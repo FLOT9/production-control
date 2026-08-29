@@ -1,6 +1,13 @@
 from datetime import datetime
+from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    field_validator,
+)
 
 
 class ProductBase(BaseModel):
@@ -24,3 +31,24 @@ class ProductRead(ProductBase):
     is_aggregated: bool
     aggregated_at: datetime | None
     created_at: datetime
+
+ProductCode = Annotated[
+    str,
+    StringConstraints(
+        strip_whitespace=True,
+        min_length=1,
+        max_length=255,
+    ),
+]
+
+
+class ProductAggregationRequest(BaseModel):
+    unique_codes: list[ProductCode] = Field(min_length=1)
+
+    @field_validator("unique_codes")
+    @classmethod
+    def validate_unique_codes(cls, codes: list[str]) -> list[str]:
+        if len(codes) != len(set(codes)):
+            raise ValueError("unique_codes must not contain duplicates")
+
+        return codes
