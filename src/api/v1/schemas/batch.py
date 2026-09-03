@@ -29,6 +29,10 @@ class BatchCreate(BatchBase):
     pass
 
 
+class BatchUpdate(BaseModel):
+    is_closed: bool
+
+
 class BatchRead(BatchBase):
     model_config = ConfigDict(
         from_attributes=True,

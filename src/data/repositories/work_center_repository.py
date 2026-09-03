@@ -13,9 +13,7 @@ class WorkCenterRepository(BaseRepository[WorkCenter]):
         self,
         identifier: str,
     ) -> WorkCenter | None:
-        statement = select(WorkCenter).where(
-            WorkCenter.identifier == identifier
-        )
+        statement = select(WorkCenter).where(WorkCenter.identifier == identifier)
         result = await self.session.execute(statement)
 
         return result.scalar_one_or_none()

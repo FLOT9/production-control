@@ -2,6 +2,7 @@ from src.data.models import WorkCenter
 from src.data.unit_of_work import UnitOfWork
 from src.domain.exceptions.work_center import (
     WorkCenterAlreadyExistsError,
+    WorkCenterHasBatchesError,
     WorkCenterNotFoundError,
 )
 
@@ -37,6 +38,10 @@ class WorkCenterService:
 
     async def delete(self, work_center_id: int) -> None:
         work_center = await self.get_by_id(work_center_id)
+
+        has_batches = await self.uow.batches.exists_by_work_center_id(work_center_id)
+        if has_batches:
+            raise WorkCenterHasBatchesError(work_center_id)
 
         await self.uow.work_centers.delete(work_center)
         await self.uow.commit()

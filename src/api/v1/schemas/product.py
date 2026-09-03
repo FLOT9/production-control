@@ -32,6 +32,7 @@ class ProductRead(ProductBase):
     aggregated_at: datetime | None
     created_at: datetime
 
+
 ProductCode = Annotated[
     str,
     StringConstraints(
