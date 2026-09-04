@@ -44,3 +44,10 @@ class BatchRead(BatchBase):
     closed_at: datetime | None
     created_at: datetime
     updated_at: datetime
+
+
+class BatchListResponse(BaseModel):
+    items: list[BatchRead]
+    total: int
+    offset: int
+    limit: int

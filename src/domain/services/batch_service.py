@@ -74,3 +74,34 @@ class BatchService:
 
         await self.uow.commit()
         return saved_batch
+
+    async def list_batches(
+        self,
+        *,
+        is_closed: bool | None,
+        offset: int,
+        limit: int,
+        batch_number: int | None,
+        batch_date: date | None,
+        work_center_id: int | None,
+        shift: str | None,
+    ) -> tuple[list[Batch], int]:
+        batches = await self.uow.batches.find_by_filters(
+            is_closed=is_closed,
+            offset=offset,
+            limit=limit,
+            batch_number=batch_number,
+            batch_date=batch_date,
+            work_center_id=work_center_id,
+            shift=shift,
+        )
+
+        total = await self.uow.batches.count_by_filters(
+            is_closed=is_closed,
+            batch_number=batch_number,
+            batch_date=batch_date,
+            work_center_id=work_center_id,
+            shift=shift,
+        )
+
+        return batches, total
