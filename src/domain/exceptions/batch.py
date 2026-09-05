@@ -15,3 +15,8 @@ class BatchAlreadyExistsError(Exception):
         super().__init__(
             f"Batch number={batch_number} on date={batch_date} already exists"
         )
+
+
+class BatchClosedError(Exception):
+    def __init__(self, batch_id: int) -> None:
+        super().__init__(f"Batch with id={batch_id} is closed")
