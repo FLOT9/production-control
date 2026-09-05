@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from typing import Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
 
 class BatchBase(BaseModel):
@@ -15,8 +15,8 @@ class BatchBase(BaseModel):
     batch_date: date
     nomenclature: str = Field(min_length=1, max_length=255)
     ekn_code: str = Field(min_length=1, max_length=100)
-    shift_start: datetime
-    shift_end: datetime
+    shift_start: AwareDatetime
+    shift_end: AwareDatetime
 
     @model_validator(mode="after")
     def validate_shift_period(self) -> Self:
