@@ -6,6 +6,7 @@ from src.api.v1.schemas.batch import (
 )
 from src.api.v1.schemas.product import (
     ProductAggregationRequest,
+    ProductAggregationTaskRead,
     ProductCreate,
     ProductRead,
 )
@@ -17,6 +18,7 @@ __all__ = [
     "BatchRead",
     "BatchUpdate",
     "ProductAggregationRequest",
+    "ProductAggregationTaskRead",
     "ProductCreate",
     "ProductRead",
     "WorkCenterCreate",

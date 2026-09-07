@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import (
     BaseModel,
@@ -8,6 +8,11 @@ from pydantic import (
     StringConstraints,
     field_validator,
 )
+
+
+class ProductAggregationTaskRead(BaseModel):
+    task_id: str
+    status: Literal["queued"] = "queued"
 
 
 class ProductBase(BaseModel):

@@ -2,10 +2,19 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends
 from starlette import status
+from starlette.concurrency import run_in_threadpool
 
-from src.api.v1.schemas import ProductCreate, ProductRead
+from src.api.v1.schemas import (
+    ProductAggregationRequest,
+    ProductAggregationTaskRead,
+    ProductCreate,
+    ProductRead,
+)
 from src.core.dependencies import get_product_service
 from src.domain.services.product_service import ProductService
+from src.tasks.product_tasks import (
+    aggregate_products as aggregate_products_task,
+)
 
 router = APIRouter(
     prefix="/products",
@@ -44,3 +53,19 @@ async def aggregate_product(
     product = ProductRead.model_validate(product)
 
     return product
+
+
+@router.post(
+    "/aggregate-bulk",
+    response_model=ProductAggregationTaskRead,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def aggregate_products_bulk(
+    payload: ProductAggregationRequest,
+) -> ProductAggregationTaskRead:
+    task = await run_in_threadpool(
+        aggregate_products_task.delay,
+        payload.unique_codes,
+    )
+
+    return ProductAggregationTaskRead(task_id=task.id)
