@@ -15,6 +15,12 @@ class ProductAggregationTaskRead(BaseModel):
     status: Literal["queued"] = "queued"
 
 
+class ProductAggregationTaskStatusRead(BaseModel):
+    task_id: str
+    status: str
+    result: dict | None = None
+
+
 class ProductBase(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 

@@ -5,13 +5,16 @@ from fastapi import FastAPI
 from src.api.exception_handlers import register_exception_handlers
 from src.api.v1.routers import api_v1_router
 from src.core.database import dispose_engine
+from src.storage.redis import close_redis
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    yield
-
-    await dispose_engine()
+    try:
+        yield
+    finally:
+        await close_redis()
+        await dispose_engine()
 
 
 app = FastAPI(

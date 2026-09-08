@@ -5,6 +5,9 @@ class Settings(BaseSettings):
     database_url: str
     debug: bool = False
     celery_broker_url: str
+    celery_result_backend: str
+    redis_cache_url: str
+    work_center_cache_ttl_seconds: int = 60
 
     model_config = SettingsConfigDict(
         env_file=".env",

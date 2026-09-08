@@ -1,20 +1,16 @@
-from typing import Annotated
+from fastapi import APIRouter, status
 
-from fastapi import APIRouter, Depends, status
-
+from src.api.dependencies.work_centers import (
+    WorkCenterCommandServiceDep,
+    WorkCenterQueryServiceDep,
+    WorkCenterServiceDep,
+)
 from src.api.v1.schemas import WorkCenterCreate, WorkCenterRead
-from src.core.dependencies import get_work_center_service
-from src.domain.services.work_center_service import WorkCenterService
 
 router = APIRouter(
     prefix="/work-centers",
     tags=["work-centers"],
 )
-
-WorkCenterServiceDep = Annotated[
-    WorkCenterService,
-    Depends(get_work_center_service),
-]
 
 
 @router.post(
@@ -37,7 +33,7 @@ async def create_work_center(
 )
 async def get_work_center(
     work_center_id: int,
-    service: WorkCenterServiceDep,
+    service: WorkCenterQueryServiceDep,
 ) -> WorkCenterRead:
     work_center = await service.get_by_id(work_center_id)
     return WorkCenterRead.model_validate(work_center)
@@ -49,6 +45,6 @@ async def get_work_center(
 )
 async def delete_work_center(
     work_center_id: int,
-    service: WorkCenterServiceDep,
+    service: WorkCenterCommandServiceDep,
 ) -> None:
     await service.delete(work_center_id)

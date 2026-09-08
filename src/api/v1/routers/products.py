@@ -7,6 +7,7 @@ from starlette.concurrency import run_in_threadpool
 from src.api.v1.schemas import (
     ProductAggregationRequest,
     ProductAggregationTaskRead,
+    ProductAggregationTaskStatusRead,
     ProductCreate,
     ProductRead,
 )
@@ -15,6 +16,7 @@ from src.domain.services.product_service import ProductService
 from src.tasks.product_tasks import (
     aggregate_products as aggregate_products_task,
 )
+from src.tasks.task_status import get_task_status
 
 router = APIRouter(
     prefix="/products",
@@ -69,3 +71,14 @@ async def aggregate_products_bulk(
     )
 
     return ProductAggregationTaskRead(task_id=task.id)
+
+
+@router.get(
+    "/tasks/{task_id}",
+    response_model=ProductAggregationTaskStatusRead,
+)
+async def aggregate_task_status(
+    task_id: str,
+) -> ProductAggregationTaskStatusRead:
+    task_data = await run_in_threadpool(get_task_status, task_id)
+    return ProductAggregationTaskStatusRead(**task_data)
