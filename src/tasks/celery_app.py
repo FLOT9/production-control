@@ -9,6 +9,8 @@ celery_app = Celery(
     include=[
         "src.tasks.smoke",
         "src.tasks.product_tasks",
+        "src.tasks.report_tasks",
+        "src.tasks.batch_tasks",
     ],
 )
 

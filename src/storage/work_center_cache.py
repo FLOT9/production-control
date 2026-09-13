@@ -1,10 +1,19 @@
-import json
 import logging
+from datetime import datetime
 
+from pydantic import BaseModel, ValidationError
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
 
 logger = logging.getLogger(__name__)
+
+
+class _WorkCenterCacheEntry(BaseModel):
+    id: int
+    identifier: str
+    name: str
+    created_at: datetime
+    updated_at: datetime
 
 
 class WorkCenterCache:
@@ -39,17 +48,28 @@ class WorkCenterCache:
         if cached is None:
             return None
 
-        return json.loads(cached)
+        try:
+            entry = _WorkCenterCacheEntry.model_validate_json(cached)
+        except ValidationError:
+            logger.warning(
+                "Invalid cached WorkCenter %s",
+                work_center_id,
+                exc_info=True,
+            )
+            return None
+
+        return entry.model_dump(mode="json")
 
     async def set(
         self,
         work_center_id: int,
         data: dict[str, object],
     ) -> None:
+        entry = _WorkCenterCacheEntry.model_validate(data)
         try:
             await self.client.set(
                 self._cache_key(work_center_id),
-                json.dumps(data),
+                entry.model_dump_json(),
                 ex=self.ttl_seconds,
             )
         except RedisError:

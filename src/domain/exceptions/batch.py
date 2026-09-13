@@ -20,3 +20,13 @@ class BatchAlreadyExistsError(Exception):
 class BatchClosedError(Exception):
     def __init__(self, batch_id: int) -> None:
         super().__init__(f"Batch with id={batch_id} is closed")
+
+
+class BatchInvalidShiftPeriodError(Exception):
+    def __init__(self) -> None:
+        super().__init__("shift_end must be later than shift_start")
+
+
+class BatchHasProductsError(Exception):
+    def __init__(self, batch_id: int) -> None:
+        super().__init__(f"Batch with id={batch_id} has products and cannot be deleted")

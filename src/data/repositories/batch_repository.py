@@ -116,3 +116,27 @@ class BatchRepository(BaseRepository[Batch]):
         total = await self.session.scalar(statement)
 
         return int(total or 0)
+
+    async def list_for_export(
+        self,
+        *,
+        is_closed: bool | None,
+        batch_number: int | None,
+        batch_date: date | None,
+        work_center_id: int | None,
+        shift: str | None,
+    ) -> list[Batch]:
+        conditions = self._build_filter_conditions(
+            is_closed=is_closed,
+            batch_number=batch_number,
+            batch_date=batch_date,
+            work_center_id=work_center_id,
+            shift=shift,
+        )
+        statement = (
+            select(Batch)
+            .where(*conditions)
+            .order_by(Batch.batch_date.desc(), Batch.id.desc())
+        )
+        result = await self.session.execute(statement)
+        return list(result.scalars().all())

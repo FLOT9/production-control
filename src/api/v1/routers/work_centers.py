@@ -1,8 +1,6 @@
 from fastapi import APIRouter, status
 
 from src.api.dependencies.work_centers import (
-    WorkCenterCommandServiceDep,
-    WorkCenterQueryServiceDep,
     WorkCenterServiceDep,
 )
 from src.api.v1.schemas import WorkCenterCreate, WorkCenterRead
@@ -33,7 +31,7 @@ async def create_work_center(
 )
 async def get_work_center(
     work_center_id: int,
-    service: WorkCenterQueryServiceDep,
+    service: WorkCenterServiceDep,
 ) -> WorkCenterRead:
     work_center = await service.get_by_id(work_center_id)
     return WorkCenterRead.model_validate(work_center)
@@ -45,6 +43,6 @@ async def get_work_center(
 )
 async def delete_work_center(
     work_center_id: int,
-    service: WorkCenterCommandServiceDep,
+    service: WorkCenterServiceDep,
 ) -> None:
     await service.delete(work_center_id)

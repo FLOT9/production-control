@@ -30,7 +30,35 @@ class BatchCreate(BatchBase):
 
 
 class BatchUpdate(BaseModel):
-    is_closed: bool
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    task_description: str | None = Field(default=None, min_length=1)
+    work_center_id: int | None = Field(default=None, gt=0)
+    shift: str | None = Field(default=None, min_length=1, max_length=50)
+    team: str | None = Field(default=None, min_length=1, max_length=255)
+    batch_number: int | None = Field(default=None, gt=0)
+    batch_date: date | None = None
+    nomenclature: str | None = Field(default=None, min_length=1, max_length=255)
+    ekn_code: str | None = Field(default=None, min_length=1, max_length=100)
+    shift_start: AwareDatetime | None = None
+    shift_end: AwareDatetime | None = None
+    is_closed: bool | None = None
+
+    @model_validator(mode="after")
+    def validate_shift_period(self) -> Self:
+        if any(
+            getattr(self, field_name) is None for field_name in self.model_fields_set
+        ):
+            raise ValueError("update fields cannot be null")
+
+        if (
+            self.shift_start is not None
+            and self.shift_end is not None
+            and self.shift_end <= self.shift_start
+        ):
+            raise ValueError("shift_end must be later than shift_start")
+
+        return self
 
 
 class BatchRead(BatchBase):

@@ -1,4 +1,4 @@
-from sqlalchemy import select
+from sqlalchemy import exists, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.data.models import Product
@@ -17,3 +17,7 @@ class ProductRepository(BaseRepository[Product]):
         product = await self.session.execute(statement)
 
         return product.scalar_one_or_none()
+
+    async def exists_by_batch_id(self, batch_id: int) -> bool:
+        statement = select(exists().where(Product.batch_id == batch_id))
+        return bool(await self.session.scalar(statement))

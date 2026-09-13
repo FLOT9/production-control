@@ -1,9 +1,15 @@
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 
+from src.application.exceptions import (
+    ObjectStorageUnavailableError,
+    ReportNotFoundError,
+)
 from src.domain.exceptions.batch import (
     BatchAlreadyExistsError,
     BatchClosedError,
+    BatchHasProductsError,
+    BatchInvalidShiftPeriodError,
     BatchNotFoundError,
 )
 from src.domain.exceptions.product import (
@@ -23,8 +29,12 @@ ERROR_STATUS_CODES: dict[type[Exception], int] = {
     BatchAlreadyExistsError: status.HTTP_409_CONFLICT,
     BatchNotFoundError: status.HTTP_404_NOT_FOUND,
     BatchClosedError: status.HTTP_409_CONFLICT,
+    BatchHasProductsError: status.HTTP_409_CONFLICT,
+    BatchInvalidShiftPeriodError: status.HTTP_422_UNPROCESSABLE_CONTENT,
     ProductAlreadyExistsError: status.HTTP_409_CONFLICT,
     ProductNotFoundError: status.HTTP_404_NOT_FOUND,
+    ReportNotFoundError: status.HTTP_404_NOT_FOUND,
+    ObjectStorageUnavailableError: status.HTTP_503_SERVICE_UNAVAILABLE,
 }
 
 

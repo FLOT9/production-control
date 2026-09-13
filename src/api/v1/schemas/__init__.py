@@ -11,6 +11,10 @@ from src.api.v1.schemas.product import (
     ProductCreate,
     ProductRead,
 )
+from src.api.v1.schemas.report import (
+    ReportGenerationTaskRead,
+    ReportGenerationTaskStatusRead,
+)
 from src.api.v1.schemas.work_center import WorkCenterCreate, WorkCenterRead
 
 __all__ = [
@@ -23,6 +27,8 @@ __all__ = [
     "ProductAggregationTaskStatusRead",
     "ProductCreate",
     "ProductRead",
+    "ReportGenerationTaskRead",
+    "ReportGenerationTaskStatusRead",
     "WorkCenterCreate",
     "WorkCenterRead",
 ]
