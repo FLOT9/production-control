@@ -3,7 +3,8 @@ from datetime import date
 from sqlalchemy import ColumnElement, exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.data.models import Batch
+from src.application.dto import BatchProductCounts
+from src.data.models import Batch, Product
 from src.data.repositories.base_repository import BaseRepository
 
 
@@ -23,6 +24,39 @@ class BatchRepository(BaseRepository[Batch]):
         result = await self.session.execute(statement)
 
         return result.scalar_one_or_none()
+
+    async def get_statistics(
+        self,
+        batch_id: int,
+    ) -> BatchProductCounts | None:
+        rows = await self.get_statistics_many([batch_id])
+        return rows[0] if rows else None
+
+    async def get_statistics_many(
+        self,
+        batch_ids: list[int],
+    ) -> list[BatchProductCounts]:
+        statement = (
+            select(
+                Batch.id.label("batch_id"),
+                func.count(Product.id).label("total_products"),
+                func.count(Product.id)
+                .filter(Product.is_aggregated.is_(True))
+                .label("aggregated_products"),
+            )
+            .outerjoin(Product, Product.batch_id == Batch.id)
+            .where(Batch.id.in_(batch_ids))
+            .group_by(Batch.id)
+        )
+        result = await self.session.execute(statement)
+        return [
+            BatchProductCounts(
+                batch_id=row.batch_id,
+                total_products=row.total_products,
+                aggregated_products=row.aggregated_products,
+            )
+            for row in result.all()
+        ]
 
     async def exists_by_work_center_id(
         self,

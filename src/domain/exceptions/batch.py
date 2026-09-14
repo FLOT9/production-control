@@ -1,6 +1,10 @@
 from datetime import date
 
 
+class BatchComparisonInvalidError(Exception):
+    pass
+
+
 class BatchNotFoundError(Exception):
     def __init__(self, batch_id: int) -> None:
         super().__init__(f"Batch with id={batch_id} was not found")

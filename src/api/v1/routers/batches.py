@@ -4,13 +4,16 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, status
 from fastapi.responses import RedirectResponse
+from pydantic import Field
 from starlette.concurrency import run_in_threadpool
 
 from src.api.dependencies.batches import BatchServiceDep
 from src.api.v1.schemas import (
+    BatchComparisonRead,
     BatchCreate,
     BatchListResponse,
     BatchRead,
+    BatchStatisticsRead,
     BatchUpdate,
     ReportGenerationTaskRead,
     ReportGenerationTaskStatusRead,
@@ -84,6 +87,34 @@ async def download_batch_export(
         url=url,
         status_code=status.HTTP_307_TEMPORARY_REDIRECT,
     )
+
+
+@router.get(
+    "/compare",
+    response_model=BatchComparisonRead,
+)
+async def compare_batches(
+    batch_ids: Annotated[
+        list[Annotated[int, Field(gt=0)]], Query(min_length=2, max_length=10)
+    ],
+    service: BatchServiceDep,
+) -> BatchComparisonRead:
+    statistics = await service.compare_batches(batch_ids)
+    return BatchComparisonRead(
+        items=[BatchStatisticsRead.model_validate(item) for item in statistics]
+    )
+
+
+@router.get(
+    "/{batch_id}/statistics",
+    response_model=BatchStatisticsRead,
+)
+async def get_batch_statistics(
+    batch_id: int,
+    service: BatchServiceDep,
+) -> BatchStatisticsRead:
+    statistics = await service.get_statistics(batch_id)
+    return BatchStatisticsRead.model_validate(statistics)
 
 
 @router.get(

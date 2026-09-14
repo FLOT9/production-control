@@ -79,3 +79,17 @@ class BatchListResponse(BaseModel):
     total: int
     offset: int
     limit: int
+
+
+class BatchStatisticsRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    batch_id: int
+    total_products: int = Field(ge=0)
+    aggregated_products: int = Field(ge=0)
+    pending_products: int = Field(ge=0)
+    aggregation_percent: float = Field(ge=0, le=100)
+
+
+class BatchComparisonRead(BaseModel):
+    items: list[BatchStatisticsRead]

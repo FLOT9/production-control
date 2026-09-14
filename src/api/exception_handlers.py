@@ -8,6 +8,7 @@ from src.application.exceptions import (
 from src.domain.exceptions.batch import (
     BatchAlreadyExistsError,
     BatchClosedError,
+    BatchComparisonInvalidError,
     BatchHasProductsError,
     BatchInvalidShiftPeriodError,
     BatchNotFoundError,
@@ -29,6 +30,7 @@ ERROR_STATUS_CODES: dict[type[Exception], int] = {
     BatchAlreadyExistsError: status.HTTP_409_CONFLICT,
     BatchNotFoundError: status.HTTP_404_NOT_FOUND,
     BatchClosedError: status.HTTP_409_CONFLICT,
+    BatchComparisonInvalidError: status.HTTP_422_UNPROCESSABLE_CONTENT,
     BatchHasProductsError: status.HTTP_409_CONFLICT,
     BatchInvalidShiftPeriodError: status.HTTP_422_UNPROCESSABLE_CONTENT,
     ProductAlreadyExistsError: status.HTTP_409_CONFLICT,

@@ -1,10 +1,12 @@
 from datetime import UTC, date, datetime
 from typing import cast
 
+from src.application.dto import BatchProductCounts, BatchStatistics
 from src.data.models import Batch
 from src.data.unit_of_work import UnitOfWork
 from src.domain.exceptions.batch import (
     BatchAlreadyExistsError,
+    BatchComparisonInvalidError,
     BatchHasProductsError,
     BatchInvalidShiftPeriodError,
     BatchNotFoundError,
@@ -35,6 +37,45 @@ class BatchService:
             raise BatchNotFoundError(batch_id)
 
         return batch
+
+    async def get_statistics(self, batch_id: int) -> BatchStatistics:
+        counts = await self.uow.batches.get_statistics(batch_id)
+        if counts is None:
+            raise BatchNotFoundError(batch_id)
+
+        return self._build_statistics(counts)
+
+    async def compare_batches(self, batch_ids: list[int]) -> list[BatchStatistics]:
+        if not 2 <= len(batch_ids) <= 10:
+            raise BatchComparisonInvalidError("Provide between 2 and 10 batch IDs")
+        if any(batch_id <= 0 for batch_id in batch_ids):
+            raise BatchComparisonInvalidError("Batch IDs must be positive")
+        if len(set(batch_ids)) != len(batch_ids):
+            raise BatchComparisonInvalidError("Batch IDs must be unique")
+
+        rows = await self.uow.batches.get_statistics_many(batch_ids)
+        by_id = {row.batch_id: row for row in rows}
+        for batch_id in batch_ids:
+            if batch_id not in by_id:
+                raise BatchNotFoundError(batch_id)
+        return [self._build_statistics(by_id[batch_id]) for batch_id in batch_ids]
+
+    @staticmethod
+    def _build_statistics(counts: BatchProductCounts) -> BatchStatistics:
+        pending_products = counts.total_products - counts.aggregated_products
+        aggregation_percent = (
+            counts.aggregated_products / counts.total_products * 100
+            if counts.total_products
+            else 0.0
+        )
+
+        return BatchStatistics(
+            batch_id=counts.batch_id,
+            total_products=counts.total_products,
+            aggregated_products=counts.aggregated_products,
+            pending_products=pending_products,
+            aggregation_percent=round(aggregation_percent, 2),
+        )
 
     async def update(
         self,
