@@ -7,11 +7,20 @@ from src.domain.exceptions.product import (
     ProductAlreadyExistsError,
     ProductNotFoundError,
 )
+from src.storage.batch_statistics_cache import BatchStatisticsCache
+from src.storage.dashboard_cache import DashboardCache
 
 
 class ProductService:
-    def __init__(self, uow: UnitOfWork) -> None:
+    def __init__(
+        self,
+        uow: UnitOfWork,
+        statistics_cache: BatchStatisticsCache,
+        dashboard_cache: DashboardCache,
+    ) -> None:
         self.uow = uow
+        self.statistics_cache = statistics_cache
+        self.dashboard_cache = dashboard_cache
 
     async def create(
         self,
@@ -37,7 +46,8 @@ class ProductService:
         )
 
         await self.uow.commit()
-
+        await self.dashboard_cache.invalidate()
+        await self.statistics_cache.delete(batch_id)
         return saved_product
 
     async def aggregate(
@@ -57,4 +67,6 @@ class ProductService:
         product.is_aggregated = True
         product.aggregated_at = datetime.now(UTC)
         await self.uow.commit()
+        await self.dashboard_cache.invalidate()
+        await self.statistics_cache.delete(product.batch_id)
         return product

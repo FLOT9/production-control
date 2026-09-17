@@ -11,8 +11,8 @@ from src.api.v1.schemas import (
     ProductCreate,
     ProductRead,
 )
+from src.application.services.product_service import ProductService
 from src.core.dependencies import get_product_service
-from src.domain.services.product_service import ProductService
 from src.tasks.product_tasks import (
     aggregate_products as aggregate_products_task,
 )

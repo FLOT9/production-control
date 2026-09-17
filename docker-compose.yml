@@ -1,4 +1,21 @@
 services:
+  flower:
+    image: mher/flower:2.1.0
+    command: ["celery", "--config=flowerconfig", "flower"]
+    environment:
+      CELERY_BROKER_URL: amqp://production_control:production_control@rabbitmq:5672//
+      FLOWER_BASIC_AUTH: ${FLOWER_BASIC_AUTH:-admin:local-flower-password}
+      PYTHONPATH: /etc/flower
+      TZ: Asia/Yekaterinburg
+    ports:
+      - "127.0.0.1:5555:5555"
+    volumes:
+      - ./flowerconfig.py:/etc/flower/flowerconfig.py:ro
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+
   postgres:
     image: postgres:16-alpine
     environment:

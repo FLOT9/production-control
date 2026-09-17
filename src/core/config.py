@@ -8,6 +8,10 @@ class Settings(BaseSettings):
     celery_result_backend: str
     redis_cache_url: str
     work_center_cache_ttl_seconds: int = 60
+    batch_statistics_cache_ttl_seconds: int = 300
+    dashboard_cache_ttl_seconds: int = 300
+    batch_list_cache_ttl_seconds: int = 60
+    batch_details_cache_ttl_seconds: int = 600
     minio_endpoint: str = "localhost:9000"
     minio_public_endpoint: str = "localhost:9000"
     minio_root_user: str = "production_control"

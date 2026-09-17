@@ -23,5 +23,7 @@ celery_app.conf.update(
     control_queue_exclusive=True,
     event_queue_exclusive=True,
     task_track_started=True,
+    worker_send_task_events=True,
+    task_send_sent_event=True,
     result_expires=3600,
 )

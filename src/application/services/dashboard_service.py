@@ -2,11 +2,13 @@ from datetime import date
 
 from src.application.dto.dashboard import DashboardSummary
 from src.data.unit_of_work import UnitOfWork
+from src.storage.dashboard_cache import DashboardCache
 
 
 class DashboardService:
-    def __init__(self, uow: UnitOfWork) -> None:
+    def __init__(self, uow: UnitOfWork, cache: DashboardCache) -> None:
         self.uow = uow
+        self.cache = cache
 
     async def get_summary(
         self,
@@ -15,6 +17,12 @@ class DashboardService:
         work_center_id: int | None = None,
         shift: str | None = None,
     ) -> DashboardSummary:
+        key = await self.cache.make_key(
+            batch_date=batch_date, work_center_id=work_center_id, shift=shift
+        )
+        cached = await self.cache.get(key)
+        if cached is not None:
+            return cached
         counts = await self.uow.dashboard.get_summary(
             batch_date=batch_date,
             work_center_id=work_center_id,
@@ -25,7 +33,7 @@ class DashboardService:
             if counts.total_products
             else 0.0
         )
-        return DashboardSummary(
+        summary = DashboardSummary(
             total_batches=counts.total_batches,
             open_batches=counts.total_batches - counts.closed_batches,
             closed_batches=counts.closed_batches,
@@ -34,3 +42,5 @@ class DashboardService:
             pending_products=counts.total_products - counts.aggregated_products,
             aggregation_percent=round(percent, 2),
         )
+        await self.cache.set(key, summary)
+        return summary

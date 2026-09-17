@@ -1,18 +1,36 @@
 import asyncio
 
+from redis.asyncio import Redis
+
+from src.application.services.product_service import ProductService
+from src.core.config import settings
 from src.core.database import async_session_maker, dispose_engine
 from src.data.unit_of_work import UnitOfWork
 from src.domain.exceptions.batch import BatchClosedError
 from src.domain.exceptions.product import ProductNotFoundError
-from src.domain.services.product_service import ProductService
+from src.storage.batch_statistics_cache import BatchStatisticsCache
+from src.storage.dashboard_cache import DashboardCache
 from src.tasks.celery_app import celery_app
 
 
 async def _aggregate_products(unique_codes: list[str]) -> dict:
+    client = Redis.from_url(
+        settings.redis_cache_url,
+        decode_responses=True,
+        socket_connect_timeout=1,
+        socket_timeout=1,
+    )
     try:
         async with async_session_maker() as session:
             uow = UnitOfWork(session)
-            service = ProductService(uow)
+            service = ProductService(
+                uow,
+                BatchStatisticsCache(
+                    client,
+                    settings.batch_statistics_cache_ttl_seconds,
+                ),
+                DashboardCache(client, settings.dashboard_cache_ttl_seconds),
+            )
 
             processed: list[str] = []
             failed: list[dict[str, str]] = []
@@ -35,7 +53,10 @@ async def _aggregate_products(unique_codes: list[str]) -> dict:
                 "failed": failed,
             }
     finally:
-        await dispose_engine()
+        try:
+            await client.aclose()
+        finally:
+            await dispose_engine()
 
 
 @celery_app.task(name="products.aggregate_many")
