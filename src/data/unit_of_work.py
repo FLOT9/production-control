@@ -6,6 +6,15 @@ from src.data.repositories.product_repository import ProductRepository
 from src.data.repositories.production_summary_repository import (
     ProductionSummaryRepository,
 )
+from src.data.repositories.webhook_delivery_attempt_repository import (
+    WebhookDeliveryAttemptRepository,
+)
+from src.data.repositories.webhook_delivery_repository import (
+    WebhookDeliveryRepository,
+)
+from src.data.repositories.webhook_subscription_repository import (
+    WebhookSubscriptionRepository,
+)
 from src.data.repositories.work_center_repository import (
     WorkCenterRepository,
 )
@@ -19,6 +28,9 @@ class UnitOfWork:
         self.dashboard = DashboardRepository(session)
         self.products = ProductRepository(session)
         self.production_summaries = ProductionSummaryRepository(session)
+        self.webhook_subscriptions = WebhookSubscriptionRepository(session)
+        self.webhook_deliveries = WebhookDeliveryRepository(session)
+        self.webhook_delivery_attempts = WebhookDeliveryAttemptRepository(session)
 
     async def commit(self) -> None:
         await self._session.commit()

@@ -4,6 +4,8 @@ from fastapi.responses import JSONResponse
 from src.application.exceptions import (
     ObjectStorageUnavailableError,
     ReportNotFoundError,
+    WebhookDeliveryNotFoundError,
+    WebhookSubscriptionNotFoundError,
 )
 from src.domain.exceptions.batch import (
     BatchAlreadyExistsError,
@@ -37,6 +39,8 @@ ERROR_STATUS_CODES: dict[type[Exception], int] = {
     ProductNotFoundError: status.HTTP_404_NOT_FOUND,
     ReportNotFoundError: status.HTTP_404_NOT_FOUND,
     ObjectStorageUnavailableError: status.HTTP_503_SERVICE_UNAVAILABLE,
+    WebhookSubscriptionNotFoundError: status.HTTP_404_NOT_FOUND,
+    WebhookDeliveryNotFoundError: status.HTTP_404_NOT_FOUND,
 }
 
 

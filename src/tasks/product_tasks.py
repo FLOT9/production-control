@@ -3,6 +3,7 @@ import asyncio
 from redis.asyncio import Redis
 
 from src.application.services.product_service import ProductService
+from src.application.services.webhook_event_service import WebhookEventService
 from src.core.config import settings
 from src.core.database import async_session_maker, dispose_engine
 from src.data.unit_of_work import UnitOfWork
@@ -30,6 +31,7 @@ async def _aggregate_products(unique_codes: list[str]) -> dict:
                     settings.batch_statistics_cache_ttl_seconds,
                 ),
                 DashboardCache(client, settings.dashboard_cache_ttl_seconds),
+                WebhookEventService(uow),
             )
 
             processed: list[str] = []

@@ -3,6 +3,7 @@ from typing import Annotated
 from fastapi import Depends
 
 from src.application.services.batch_service import BatchService
+from src.application.services.webhook_event_service import WebhookEventService
 from src.core.config import settings
 from src.core.dependencies import get_dashboard_cache, get_uow
 from src.data.unit_of_work import UnitOfWork
@@ -39,7 +40,12 @@ async def get_batch_service(
     ],
 ) -> BatchService:
     return BatchService(
-        uow, statistics_cache, dashboard_cache, list_cache, details_cache
+        uow=uow,
+        statistics_cache=statistics_cache,
+        dashboard_cache=dashboard_cache,
+        list_cache=list_cache,
+        details_cache=details_cache,
+        webhook_event_service=WebhookEventService(uow),
     )
 
 

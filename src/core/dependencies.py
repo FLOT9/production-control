@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.application.services.product_service import ProductService
 from src.application.services.report_download_service import ReportDownloadService
+from src.application.services.webhook_event_service import WebhookEventService
 from src.core.config import settings
 from src.core.database import get_db
 from src.data.unit_of_work import UnitOfWork
@@ -35,6 +36,7 @@ async def get_product_service(
             settings.batch_statistics_cache_ttl_seconds,
         ),
         dashboard_cache,
+        WebhookEventService(uow),
     )
 
 

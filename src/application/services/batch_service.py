@@ -2,6 +2,8 @@ from datetime import UTC, date, datetime
 from typing import cast
 
 from src.application.dto import BatchProductCounts, BatchStatistics
+from src.application.events import WebhookEvent, WebhookEventType
+from src.application.services.webhook_event_service import WebhookEventService
 from src.data.models import Batch
 from src.data.unit_of_work import UnitOfWork
 from src.domain.exceptions.batch import (
@@ -39,12 +41,14 @@ class BatchService:
         dashboard_cache: DashboardCache,
         list_cache: BatchListCache,
         details_cache: BatchDetailsCache,
+        webhook_event_service: WebhookEventService,
     ) -> None:
         self.uow = uow
         self.statistics_cache = statistics_cache
         self.dashboard_cache = dashboard_cache
         self.list_cache = list_cache
         self.details_cache = details_cache
+        self.webhook_event_service = webhook_event_service
 
     async def get_by_id(self, batch_id: int) -> Batch | dict[str, object]:
         cached = await self.details_cache.get(batch_id)
@@ -121,6 +125,8 @@ class BatchService:
         if not changes:
             return batch
 
+        was_closed = batch.is_closed
+
         work_center_id = cast(
             int,
             changes.get("work_center_id", batch.work_center_id),
@@ -154,6 +160,29 @@ class BatchService:
             if batch.is_closed != is_closed:
                 batch.is_closed = is_closed
                 batch.closed_at = datetime.now(UTC) if is_closed else None
+
+        event_type = WebhookEventType.BATCH_UPDATED
+        if batch.is_closed != was_closed:
+            event_type = (
+                WebhookEventType.BATCH_CLOSED
+                if batch.is_closed
+                else WebhookEventType.BATCH_REOPENED
+            )
+
+        await self.webhook_event_service.create_deliveries(
+            WebhookEvent(
+                event_type=event_type,
+                data={
+                    "batch_id": batch.id,
+                    "batch_number": batch.batch_number,
+                    "batch_date": batch.batch_date.isoformat(),
+                    "work_center_id": batch.work_center_id,
+                    "shift": batch.shift,
+                    "is_closed": batch.is_closed,
+                    "changed_fields": sorted(changes),
+                },
+            )
+        )
 
         await self.uow.commit()
         await self.dashboard_cache.invalidate()
@@ -213,6 +242,19 @@ class BatchService:
             ekn_code=ekn_code,
             shift_start=shift_start,
             shift_end=shift_end,
+        )
+
+        await self.webhook_event_service.create_deliveries(
+            WebhookEvent(
+                event_type=WebhookEventType.BATCH_CREATED,
+                data={
+                    "batch_id": saved_batch.id,
+                    "batch_number": saved_batch.batch_number,
+                    "batch_date": saved_batch.batch_date.isoformat(),
+                    "work_center_id": saved_batch.work_center_id,
+                    "shift": saved_batch.shift,
+                },
+            )
         )
 
         await self.uow.commit()

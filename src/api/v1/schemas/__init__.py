@@ -17,6 +17,11 @@ from src.api.v1.schemas.report import (
     ReportGenerationTaskRead,
     ReportGenerationTaskStatusRead,
 )
+from src.api.v1.schemas.webhook import (
+    WebhookSubscriptionCreate,
+    WebhookSubscriptionRead,
+    WebhookSubscriptionUpdate,
+)
 from src.api.v1.schemas.work_center import WorkCenterCreate, WorkCenterRead
 
 __all__ = [
@@ -33,6 +38,9 @@ __all__ = [
     "ProductRead",
     "ReportGenerationTaskRead",
     "ReportGenerationTaskStatusRead",
+    "WebhookSubscriptionCreate",
+    "WebhookSubscriptionRead",
+    "WebhookSubscriptionUpdate",
     "WorkCenterCreate",
     "WorkCenterRead",
 ]

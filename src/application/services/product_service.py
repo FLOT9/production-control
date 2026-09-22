@@ -1,5 +1,7 @@
 from datetime import UTC, datetime
 
+from src.application.events import WebhookEvent, WebhookEventType
+from src.application.services.webhook_event_service import WebhookEventService
 from src.data.models import Product
 from src.data.unit_of_work import UnitOfWork
 from src.domain.exceptions.batch import BatchClosedError, BatchNotFoundError
@@ -17,10 +19,12 @@ class ProductService:
         uow: UnitOfWork,
         statistics_cache: BatchStatisticsCache,
         dashboard_cache: DashboardCache,
+        webhook_event_service: WebhookEventService,
     ) -> None:
         self.uow = uow
         self.statistics_cache = statistics_cache
         self.dashboard_cache = dashboard_cache
+        self.webhook_event_service = webhook_event_service
 
     async def create(
         self,
@@ -45,6 +49,17 @@ class ProductService:
             batch_id=batch_id,
         )
 
+        await self.webhook_event_service.create_deliveries(
+            WebhookEvent(
+                event_type=WebhookEventType.PRODUCT_CREATED,
+                data={
+                    "product_id": saved_product.id,
+                    "unique_code": saved_product.unique_code,
+                    "batch_id": saved_product.batch_id,
+                },
+            )
+        )
+
         await self.uow.commit()
         await self.dashboard_cache.invalidate()
         await self.statistics_cache.delete(batch_id)
@@ -66,6 +81,19 @@ class ProductService:
 
         product.is_aggregated = True
         product.aggregated_at = datetime.now(UTC)
+
+        await self.webhook_event_service.create_deliveries(
+            WebhookEvent(
+                event_type=WebhookEventType.PRODUCT_AGGREGATED,
+                data={
+                    "product_id": product.id,
+                    "unique_code": product.unique_code,
+                    "batch_id": product.batch_id,
+                    "aggregated_at": product.aggregated_at.isoformat(),
+                },
+            )
+        )
+
         await self.uow.commit()
         await self.dashboard_cache.invalidate()
         await self.statistics_cache.delete(product.batch_id)

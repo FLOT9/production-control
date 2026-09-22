@@ -1,6 +1,12 @@
 from uuid import UUID
 
 
+class BatchCsvHeadersError(Exception):
+    def __init__(self, missing_headers: list[str]) -> None:
+        headers = ", ".join(missing_headers)
+        super().__init__(f"CSV is missing required headers: {headers}")
+
+
 class ProductionSummaryEmptyError(Exception):
     def __init__(self) -> None:
         super().__init__("No production data available for report")
@@ -14,3 +20,15 @@ class ReportNotFoundError(Exception):
 class ObjectStorageUnavailableError(Exception):
     def __init__(self) -> None:
         super().__init__("Object storage is unavailable")
+
+
+class WebhookSubscriptionNotFoundError(Exception):
+    def __init__(self, subscription_id: int) -> None:
+        super().__init__(
+            f"Webhook subscription with id={subscription_id} was not found"
+        )
+
+
+class WebhookDeliveryNotFoundError(Exception):
+    def __init__(self, delivery_id: int) -> None:
+        super().__init__(f"Webhook delivery with id={delivery_id} was not found")

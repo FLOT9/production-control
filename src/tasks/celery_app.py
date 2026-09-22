@@ -11,6 +11,7 @@ celery_app = Celery(
         "src.tasks.product_tasks",
         "src.tasks.report_tasks",
         "src.tasks.batch_tasks",
+        "src.tasks.webhook_tasks",
     ],
 )
 
@@ -26,4 +27,11 @@ celery_app.conf.update(
     worker_send_task_events=True,
     task_send_sent_event=True,
     result_expires=3600,
+    beat_schedule={
+        "dispatch-ready-webhooks": {
+            "task": "webhooks.dispatch",
+            "schedule": 10.0,
+            "kwargs": {"limit": 100},
+        },
+    },
 )
