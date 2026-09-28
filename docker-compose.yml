@@ -1,4 +1,63 @@
+x-app: &app
+  build:
+    context: .
+    dockerfile: docker/app.Dockerfile
+  image: production-control:local
+  env_file: .env
+  environment:
+    DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/production_control
+    CELERY_BROKER_URL: amqp://production_control:production_control@rabbitmq:5672//
+    CELERY_RESULT_BACKEND: redis://redis:6379/0
+    REDIS_CACHE_URL: redis://redis:6379/1
+    MINIO_ENDPOINT: minio:9000
+    MINIO_PUBLIC_ENDPOINT: localhost:9000
+    MINIO_ROOT_USER: ${MINIO_ROOT_USER:-production_control}
+    MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-local-minio-password}
+
+x-app-depends-on: &app-depends-on
+  migrate:
+    condition: service_completed_successfully
+  rabbitmq:
+    condition: service_healthy
+  redis:
+    condition: service_healthy
+  minio-init:
+    condition: service_completed_successfully
+
 services:
+  migrate:
+    <<: *app
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    <<: *app
+    command: ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on: *app-depends-on
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  worker:
+    <<: *app
+    command: ["celery", "-A", "src.tasks.celery_app:celery_app", "worker", "--loglevel=info", "--pool=solo"]
+    depends_on: *app-depends-on
+    restart: unless-stopped
+
+  beat:
+    <<: *app
+    command: ["celery", "-A", "src.tasks.celery_app:celery_app", "beat", "--loglevel=info"]
+    depends_on: *app-depends-on
+    restart: unless-stopped
+
   flower:
     image: mher/flower:2.1.0
     command: ["celery", "--config=flowerconfig", "flower"]
