@@ -78,18 +78,19 @@ services:
       retries: 10
 
   minio-init:
-    image: minio/mc:RELEASE.2025-08-13T08-35-41Z
+    build:
+      context: .
+      dockerfile: docker/minio-init.Dockerfile
     depends_on:
       minio:
         condition: service_healthy
     environment:
+      MINIO_ENDPOINT: minio:9000
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-production_control}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-local-minio-password}
-    entrypoint: ["/bin/sh", "-ec"]
-    command:
-      - |
-        mc alias set storage http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"
-        mc mb --ignore-existing storage/reports storage/exports storage/imports
+      MINIO_IMPORT_RETENTION_DAYS: ${MINIO_IMPORT_RETENTION_DAYS:-7}
+      MINIO_EXPORT_RETENTION_DAYS: ${MINIO_EXPORT_RETENTION_DAYS:-7}
+      MINIO_REPORT_RETENTION_DAYS: ${MINIO_REPORT_RETENTION_DAYS:-30}
     restart: "no"
 
 volumes:
