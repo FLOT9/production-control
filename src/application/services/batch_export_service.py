@@ -1,8 +1,7 @@
 from asyncio import to_thread
-from datetime import date
 from uuid import uuid4
 
-from src.application.dto import StoredReport
+from src.application.dto import BatchFilters, StoredReport
 from src.application.reports.batch_csv import BatchCsvExporter
 from src.data.unit_of_work import UnitOfWork
 from src.storage.object_storage import ObjectStorage
@@ -25,19 +24,9 @@ class BatchExportService:
     async def export_and_upload_csv(
         self,
         *,
-        is_closed: bool | None,
-        batch_number: int | None,
-        batch_date: date | None,
-        work_center_id: int | None,
-        shift: str | None,
+        filters: BatchFilters,
     ) -> StoredReport:
-        batches = await self.uow.batches.list_for_export(
-            is_closed=is_closed,
-            batch_number=batch_number,
-            batch_date=batch_date,
-            work_center_id=work_center_id,
-            shift=shift,
-        )
+        batches = await self.uow.batches.list_for_export(filters=filters)
         data = await to_thread(self.csv_exporter.generate, batches)
 
         report_id = uuid4()

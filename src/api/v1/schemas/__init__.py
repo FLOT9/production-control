@@ -1,6 +1,7 @@
 from src.api.v1.schemas.batch import (
     BatchComparisonRead,
     BatchCreate,
+    BatchImportTaskStatusRead,
     BatchListResponse,
     BatchRead,
     BatchStatisticsRead,
@@ -27,6 +28,7 @@ from src.api.v1.schemas.work_center import WorkCenterCreate, WorkCenterRead
 __all__ = [
     "BatchComparisonRead",
     "BatchCreate",
+    "BatchImportTaskStatusRead",
     "BatchListResponse",
     "BatchRead",
     "BatchStatisticsRead",

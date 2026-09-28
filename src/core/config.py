@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     minio_root_user: str = "production_control"
     minio_root_password: str = "local-minio-password"
     minio_secure: bool = False
+    batch_import_max_file_size_bytes: int = 5 * 1024 * 1024
 
     model_config = SettingsConfigDict(
         env_file=".env",

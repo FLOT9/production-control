@@ -1,52 +1,39 @@
+from datetime import date
 from typing import Annotated
 
-from fastapi import Depends
+from fastapi import Depends, Query
 
+from src.application.dto import BatchFilters
 from src.application.services.batch_service import BatchService
-from src.application.services.webhook_event_service import WebhookEventService
-from src.core.config import settings
-from src.core.dependencies import get_dashboard_cache, get_uow
+from src.core.batch_service_factory import build_batch_service
+from src.core.dependencies import get_uow
 from src.data.unit_of_work import UnitOfWork
-from src.storage.batch_details_cache import BatchDetailsCache
-from src.storage.batch_list_cache import BatchListCache
-from src.storage.batch_statistics_cache import BatchStatisticsCache
-from src.storage.dashboard_cache import DashboardCache
 from src.storage.redis import redis_client
 
 
-async def get_batch_statistics_cache() -> BatchStatisticsCache:
-    return BatchStatisticsCache(
-        client=redis_client,
-        ttl_seconds=settings.batch_statistics_cache_ttl_seconds,
+def get_batch_filters(
+    is_closed: bool | None = None,
+    batch_number: int | None = Query(None, gt=0),
+    batch_date: date | None = None,
+    work_center_id: int | None = Query(None, gt=0),
+    shift: str | None = Query(None, min_length=1, max_length=50),
+) -> BatchFilters:
+    return BatchFilters(
+        is_closed=is_closed,
+        batch_number=batch_number,
+        batch_date=batch_date,
+        work_center_id=work_center_id,
+        shift=shift,
     )
 
 
-async def get_batch_list_cache() -> BatchListCache:
-    return BatchListCache(redis_client, settings.batch_list_cache_ttl_seconds)
-
-
-async def get_batch_details_cache() -> BatchDetailsCache:
-    return BatchDetailsCache(redis_client, settings.batch_details_cache_ttl_seconds)
+BatchFiltersDep = Annotated[BatchFilters, Depends(get_batch_filters)]
 
 
 async def get_batch_service(
     uow: Annotated[UnitOfWork, Depends(get_uow)],
-    dashboard_cache: Annotated[DashboardCache, Depends(get_dashboard_cache)],
-    list_cache: Annotated[BatchListCache, Depends(get_batch_list_cache)],
-    details_cache: Annotated[BatchDetailsCache, Depends(get_batch_details_cache)],
-    statistics_cache: Annotated[
-        BatchStatisticsCache,
-        Depends(get_batch_statistics_cache),
-    ],
 ) -> BatchService:
-    return BatchService(
-        uow=uow,
-        statistics_cache=statistics_cache,
-        dashboard_cache=dashboard_cache,
-        list_cache=list_cache,
-        details_cache=details_cache,
-        webhook_event_service=WebhookEventService(uow),
-    )
+    return build_batch_service(uow, redis_client)
 
 
 BatchServiceDep = Annotated[

@@ -1,3 +1,5 @@
+from sqlalchemy.exc import IntegrityError
+
 from src.data.models import WorkCenter
 from src.data.unit_of_work import UnitOfWork
 from src.domain.exceptions.work_center import (
@@ -21,9 +23,13 @@ class WorkCenterService:
         if await self.uow.work_centers.get_by_identifier(identifier):
             raise WorkCenterAlreadyExistsError(identifier)
 
-        saved_work_center = await self.uow.work_centers.create(
-            name=name, identifier=identifier
-        )
+        try:
+            saved_work_center = await self.uow.work_centers.create(
+                name=name, identifier=identifier
+            )
+        except IntegrityError as error:
+            await self.uow.rollback()
+            raise WorkCenterAlreadyExistsError(identifier) from error
         await self.uow.commit()
 
         return saved_work_center
@@ -32,7 +38,8 @@ class WorkCenterService:
         self,
         work_center_id: int,
     ) -> dict[str, object]:
-        cached = await self.cache.get(work_center_id)
+        key = await self.cache.make_key(work_center_id)
+        cached = await self.cache.get(key, work_center_id)
 
         if cached is not None:
             return cached
@@ -47,7 +54,7 @@ class WorkCenterService:
             "updated_at": work_center.updated_at.isoformat(),
         }
 
-        await self.cache.set(work_center_id, data)
+        await self.cache.set(key, work_center_id, data)
         return data
 
     async def _get_from_db(
@@ -69,4 +76,4 @@ class WorkCenterService:
 
         await self.uow.work_centers.delete(work_center)
         await self.uow.commit()
-        await self.cache.delete(work_center_id)
+        await self.cache.invalidate(work_center_id)

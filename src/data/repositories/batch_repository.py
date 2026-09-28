@@ -3,7 +3,7 @@ from datetime import date
 from sqlalchemy import ColumnElement, exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.application.dto import BatchProductCounts
+from src.application.dto import BatchFilters, BatchProductCounts
 from src.data.models import Batch, Product
 from src.data.repositories.base_repository import BaseRepository
 
@@ -11,6 +11,11 @@ from src.data.repositories.base_repository import BaseRepository
 class BatchRepository(BaseRepository[Batch]):
     def __init__(self, session: AsyncSession) -> None:
         super().__init__(session, Batch)
+
+    async def get_by_id_for_update(self, batch_id: int) -> Batch | None:
+        statement = select(Batch).where(Batch.id == batch_id).with_for_update()
+        result = await self.session.execute(statement)
+        return result.scalar_one_or_none()
 
     async def get_by_number_and_date(
         self,
@@ -70,49 +75,35 @@ class BatchRepository(BaseRepository[Batch]):
     def _build_filter_conditions(
         self,
         *,
-        is_closed: bool | None,
-        batch_number: int | None,
-        batch_date: date | None,
-        work_center_id: int | None,
-        shift: str | None,
+        filters: BatchFilters,
     ) -> list[ColumnElement[bool]]:
         conditions = []
 
-        if is_closed is not None:
-            conditions.append(Batch.is_closed == is_closed)
+        if filters.is_closed is not None:
+            conditions.append(Batch.is_closed == filters.is_closed)
 
-        if batch_number is not None:
-            conditions.append(Batch.batch_number == batch_number)
+        if filters.batch_number is not None:
+            conditions.append(Batch.batch_number == filters.batch_number)
 
-        if batch_date is not None:
-            conditions.append(Batch.batch_date == batch_date)
+        if filters.batch_date is not None:
+            conditions.append(Batch.batch_date == filters.batch_date)
 
-        if work_center_id is not None:
-            conditions.append(Batch.work_center_id == work_center_id)
+        if filters.work_center_id is not None:
+            conditions.append(Batch.work_center_id == filters.work_center_id)
 
-        if shift is not None:
-            conditions.append(Batch.shift == shift)
+        if filters.shift is not None:
+            conditions.append(Batch.shift == filters.shift)
 
         return conditions
 
     async def find_by_filters(
         self,
         *,
-        is_closed: bool | None,
+        filters: BatchFilters,
         offset: int,
         limit: int,
-        batch_number: int | None,
-        batch_date: date | None,
-        work_center_id: int | None,
-        shift: str | None,
     ) -> list[Batch]:
-        conditions = self._build_filter_conditions(
-            is_closed=is_closed,
-            batch_number=batch_number,
-            batch_date=batch_date,
-            work_center_id=work_center_id,
-            shift=shift,
-        )
+        conditions = self._build_filter_conditions(filters=filters)
 
         statement = (
             select(Batch)
@@ -131,19 +122,9 @@ class BatchRepository(BaseRepository[Batch]):
     async def count_by_filters(
         self,
         *,
-        is_closed: bool | None,
-        batch_number: int | None,
-        batch_date: date | None,
-        work_center_id: int | None,
-        shift: str | None,
+        filters: BatchFilters,
     ) -> int:
-        conditions = self._build_filter_conditions(
-            is_closed=is_closed,
-            batch_number=batch_number,
-            batch_date=batch_date,
-            work_center_id=work_center_id,
-            shift=shift,
-        )
+        conditions = self._build_filter_conditions(filters=filters)
 
         statement = select(func.count(Batch.id)).where(*conditions)
 
@@ -154,19 +135,9 @@ class BatchRepository(BaseRepository[Batch]):
     async def list_for_export(
         self,
         *,
-        is_closed: bool | None,
-        batch_number: int | None,
-        batch_date: date | None,
-        work_center_id: int | None,
-        shift: str | None,
+        filters: BatchFilters,
     ) -> list[Batch]:
-        conditions = self._build_filter_conditions(
-            is_closed=is_closed,
-            batch_number=batch_number,
-            batch_date=batch_date,
-            work_center_id=work_center_id,
-            shift=shift,
-        )
+        conditions = self._build_filter_conditions(filters=filters)
         statement = (
             select(Batch)
             .where(*conditions)

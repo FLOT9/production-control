@@ -49,6 +49,15 @@ class BatchCsvParser:
         errors: list[BatchImportRowError] = []
 
         for row_number, raw_row in enumerate(raw_rows, start=2):
+            if None in raw_row:
+                errors.append(
+                    BatchImportRowError(
+                        row_number=row_number,
+                        reason="CSV row has more values than headers",
+                    )
+                )
+                continue
+
             try:
                 row = BatchImportRow.model_validate(raw_row)
             except ValidationError as error:

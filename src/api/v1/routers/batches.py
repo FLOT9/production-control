@@ -1,16 +1,17 @@
-from datetime import date
+import uuid
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import RedirectResponse
 from pydantic import Field
 from starlette.concurrency import run_in_threadpool
 
-from src.api.dependencies.batches import BatchServiceDep
+from src.api.dependencies.batches import BatchFiltersDep, BatchServiceDep
 from src.api.v1.schemas import (
     BatchComparisonRead,
     BatchCreate,
+    BatchImportTaskStatusRead,
     BatchListResponse,
     BatchRead,
     BatchStatisticsRead,
@@ -19,8 +20,11 @@ from src.api.v1.schemas import (
     ReportGenerationTaskStatusRead,
 )
 from src.application.services.report_download_service import ReportDownloadService
+from src.core.config import settings
 from src.core.dependencies import get_report_download_service
+from src.storage.object_storage import create_object_storage
 from src.tasks.batch_tasks import export_batches_csv as export_batches_csv_task
+from src.tasks.batch_tasks import import_batches_csv as import_batches_csv_task
 from src.tasks.task_status import get_task_status
 
 router = APIRouter(
@@ -48,19 +52,15 @@ async def create_batch(
     status_code=status.HTTP_202_ACCEPTED,
 )
 async def export_batches_csv(
-    is_closed: bool | None = None,
-    batch_number: int | None = Query(None, gt=0),
-    batch_date: date | None = None,
-    work_center_id: int | None = Query(None, gt=0),
-    shift: str | None = Query(None, min_length=1, max_length=50),
+    filters: BatchFiltersDep,
 ) -> ReportGenerationTaskRead:
     task = await run_in_threadpool(
         export_batches_csv_task.delay,
-        is_closed=is_closed,
-        batch_number=batch_number,
-        batch_date=batch_date.isoformat() if batch_date else None,
-        work_center_id=work_center_id,
-        shift=shift,
+        is_closed=filters.is_closed,
+        batch_number=filters.batch_number,
+        batch_date=filters.batch_date.isoformat() if filters.batch_date else None,
+        work_center_id=filters.work_center_id,
+        shift=filters.shift,
     )
     return ReportGenerationTaskRead(task_id=task.id)
 
@@ -162,20 +162,12 @@ async def delete_batch(
 )
 async def list_batches(
     service: BatchServiceDep,
-    is_closed: bool | None = None,
-    batch_number: int | None = Query(None, gt=0),
-    batch_date: date | None = None,
-    work_center_id: int | None = Query(None, gt=0),
-    shift: str | None = Query(None, min_length=1, max_length=50),
+    filters: BatchFiltersDep,
     offset: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=100),
 ) -> BatchListResponse:
     batches, total = await service.list_batches(
-        is_closed=is_closed,
-        batch_number=batch_number,
-        batch_date=batch_date,
-        work_center_id=work_center_id,
-        shift=shift,
+        filters=filters,
         offset=offset,
         limit=limit,
     )
@@ -187,3 +179,38 @@ async def list_batches(
         limit=limit,
     )
     return result
+
+
+@router.post(
+    "/import/csv",
+    response_model=ReportGenerationTaskRead,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def import_batches_csv(
+    file: Annotated[UploadFile, File()],
+) -> ReportGenerationTaskRead:
+    data = await file.read(settings.batch_import_max_file_size_bytes + 1)
+    if len(data) > settings.batch_import_max_file_size_bytes:
+        raise HTTPException(status_code=413, detail="File too large")
+    object_name = f"batch-imports/{uuid.uuid4().hex}.csv"
+    storage = create_object_storage()
+
+    await run_in_threadpool(
+        storage.upload,
+        "imports",
+        object_name,
+        data,
+        "text/csv",
+    )
+
+    task = await run_in_threadpool(import_batches_csv_task.delay, object_name)
+    return ReportGenerationTaskRead(task_id=task.id)
+
+
+@router.get(
+    "/import/tasks/{task_id}",
+    response_model=BatchImportTaskStatusRead,
+)
+async def batch_import_task_status(task_id: str) -> BatchImportTaskStatusRead:
+    task_data = await run_in_threadpool(get_task_status, task_id)
+    return BatchImportTaskStatusRead(**task_data)

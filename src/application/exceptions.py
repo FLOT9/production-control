@@ -7,6 +7,10 @@ class BatchCsvHeadersError(Exception):
         super().__init__(f"CSV is missing required headers: {headers}")
 
 
+class BatchCsvFileError(Exception):
+    """A file-level CSV error safe to return to the import client."""
+
+
 class ProductionSummaryEmptyError(Exception):
     def __init__(self) -> None:
         super().__init__("No production data available for report")

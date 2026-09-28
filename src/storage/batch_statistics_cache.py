@@ -1,4 +1,5 @@
 import logging
+from uuid import uuid4
 
 from pydantic import BaseModel, ValidationError
 from redis.asyncio import Redis
@@ -27,20 +28,34 @@ class BatchStatisticsCache:
         self.ttl_seconds = ttl_seconds
 
     @staticmethod
-    def _cache_key(batch_id: int) -> str:
-        return f"batch-statistics:{batch_id}"
+    def _generation_key(batch_id: int) -> str:
+        return f"batch-statistics:v2:{batch_id}:generation"
 
-    async def get(self, batch_id: int) -> BatchStatistics | None:
+    async def make_key(self, batch_id: int) -> str | None:
+        generation_key = self._generation_key(batch_id)
         try:
-            cached = await self.client.get(self._cache_key(batch_id))
+            generation = await self.client.get(generation_key)
+            if generation is None:
+                await self.client.set(generation_key, uuid4().hex, nx=True)
+                generation = await self.client.get(generation_key)
+            if generation is None:
+                return None
+            return f"batch-statistics:v2:{batch_id}:data:{generation}"
         except RedisError:
-            logger.warning(
-                "Redis unavailable when reading statistics for Batch %s",
-                batch_id,
-                exc_info=True,
-            )
+            logger.warning("Cannot read statistics cache generation", exc_info=True)
             return None
 
+    async def make_keys(self, batch_ids: list[int]) -> dict[int, str | None]:
+        return {batch_id: await self.make_key(batch_id) for batch_id in batch_ids}
+
+    async def get(self, key: str | None, batch_id: int) -> BatchStatistics | None:
+        if key is None:
+            return None
+        try:
+            cached = await self.client.get(key)
+        except RedisError:
+            logger.warning("Cannot read statistics cache", exc_info=True)
+            return None
         return self._decode(batch_id, cached)
 
     @staticmethod
@@ -63,26 +78,27 @@ class BatchStatisticsCache:
             return None
         return BatchStatistics(**entry.model_dump())
 
-    async def get_many(self, batch_ids: list[int]) -> dict[int, BatchStatistics]:
-        if not batch_ids:
+    async def get_many(self, keys: dict[int, str | None]) -> dict[int, BatchStatistics]:
+        available = [(batch_id, key) for batch_id, key in keys.items() if key]
+        if not available:
             return {}
         try:
-            values = await self.client.mget(
-                [self._cache_key(batch_id) for batch_id in batch_ids]
-            )
+            values = await self.client.mget([key for _, key in available])
         except RedisError:
             logger.warning(
                 "Redis unavailable when reading batch statistics", exc_info=True
             )
             return {}
         found = {}
-        for batch_id, value in zip(batch_ids, values, strict=True):
+        for (batch_id, _), value in zip(available, values, strict=True):
             statistics = self._decode(batch_id, value)
             if statistics is not None:
                 found[batch_id] = statistics
         return found
 
-    async def set_many(self, statistics: list[BatchStatistics]) -> None:
+    async def set_many(
+        self, keys: dict[int, str | None], statistics: list[BatchStatistics]
+    ) -> None:
         if not statistics:
             return
         entries = [
@@ -92,25 +108,25 @@ class BatchStatisticsCache:
         try:
             async with self.client.pipeline(transaction=False) as pipeline:
                 for entry in entries:
-                    pipeline.set(
-                        self._cache_key(entry.batch_id),
-                        entry.model_dump_json(),
-                        ex=self.ttl_seconds,
-                    )
+                    key = keys.get(entry.batch_id)
+                    if key is not None:
+                        pipeline.set(key, entry.model_dump_json(), ex=self.ttl_seconds)
                 await pipeline.execute()
         except RedisError:
             logger.warning(
                 "Redis unavailable when caching batch statistics", exc_info=True
             )
 
-    async def set(self, statistics: BatchStatistics) -> None:
+    async def set(self, key: str | None, statistics: BatchStatistics) -> None:
+        if key is None:
+            return
         entry = _BatchStatisticsCacheEntry.model_validate(
             statistics,
             from_attributes=True,
         )
         try:
             await self.client.set(
-                self._cache_key(statistics.batch_id),
+                key,
                 entry.model_dump_json(),
                 ex=self.ttl_seconds,
             )
@@ -121,9 +137,9 @@ class BatchStatisticsCache:
                 exc_info=True,
             )
 
-    async def delete(self, batch_id: int) -> None:
+    async def invalidate(self, batch_id: int) -> None:
         try:
-            await self.client.delete(self._cache_key(batch_id))
+            await self.client.set(self._generation_key(batch_id), uuid4().hex)
         except RedisError:
             logger.warning(
                 "Failed to invalidate cached statistics for Batch %s",

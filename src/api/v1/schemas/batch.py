@@ -3,6 +3,8 @@ from typing import Self
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
+from src.application.dto.batch_import import BatchImportResult
+
 
 class BatchBase(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
@@ -93,3 +95,10 @@ class BatchStatisticsRead(BaseModel):
 
 class BatchComparisonRead(BaseModel):
     items: list[BatchStatisticsRead]
+
+
+class BatchImportTaskStatusRead(BaseModel):
+    task_id: str
+    status: str
+    result: BatchImportResult | None = None
+    error: str | None = None

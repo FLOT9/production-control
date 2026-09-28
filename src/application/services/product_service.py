@@ -1,5 +1,7 @@
 from datetime import UTC, datetime
 
+from sqlalchemy.exc import IntegrityError
+
 from src.application.events import WebhookEvent, WebhookEventType
 from src.application.services.webhook_event_service import WebhookEventService
 from src.data.models import Product
@@ -32,7 +34,7 @@ class ProductService:
         unique_code: str,
         batch_id: int,
     ) -> Product:
-        batch = await self.uow.batches.get_by_id(instance_id=batch_id)
+        batch = await self.uow.batches.get_by_id_for_update(batch_id)
         if batch is None:
             raise BatchNotFoundError(batch_id)
 
@@ -44,10 +46,14 @@ class ProductService:
         if product is not None:
             raise ProductAlreadyExistsError(product.unique_code)
 
-        saved_product = await self.uow.products.create(
-            unique_code=unique_code,
-            batch_id=batch_id,
-        )
+        try:
+            saved_product = await self.uow.products.create(
+                unique_code=unique_code,
+                batch_id=batch_id,
+            )
+        except IntegrityError as error:
+            await self.uow.rollback()
+            raise ProductAlreadyExistsError(unique_code) from error
 
         await self.webhook_event_service.create_deliveries(
             WebhookEvent(
@@ -62,7 +68,7 @@ class ProductService:
 
         await self.uow.commit()
         await self.dashboard_cache.invalidate()
-        await self.statistics_cache.delete(batch_id)
+        await self.statistics_cache.invalidate(batch_id)
         return saved_product
 
     async def aggregate(
@@ -70,10 +76,12 @@ class ProductService:
         *,
         unique_code: str,
     ) -> Product:
-        product = await self.uow.products.get_by_unique_code(unique_code=unique_code)
+        product = await self.uow.products.get_by_unique_code_for_update(
+            unique_code=unique_code
+        )
         if product is None:
             raise ProductNotFoundError(unique_code)
-        batch = await self.uow.batches.get_by_id(instance_id=product.batch_id)
+        batch = await self.uow.batches.get_by_id_for_update(product.batch_id)
         if batch.is_closed:
             raise BatchClosedError(product.batch_id)
         if product.is_aggregated:
@@ -96,5 +104,5 @@ class ProductService:
 
         await self.uow.commit()
         await self.dashboard_cache.invalidate()
-        await self.statistics_cache.delete(product.batch_id)
+        await self.statistics_cache.invalidate(product.batch_id)
         return product

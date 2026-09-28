@@ -3,6 +3,8 @@ from types import SimpleNamespace
 from unittest import IsolatedAsyncioTestCase
 from unittest.mock import AsyncMock, Mock
 
+from sqlalchemy.exc import IntegrityError
+
 from src.application.services.work_center_service import WorkCenterService
 from src.domain.exceptions.work_center import (
     WorkCenterAlreadyExistsError,
@@ -31,11 +33,13 @@ class WorkCenterServiceTests(IsolatedAsyncioTestCase):
                 exists_by_work_center_id=AsyncMock(return_value=False)
             ),
             commit=AsyncMock(),
+            rollback=AsyncMock(),
         )
         self.cache = SimpleNamespace(
+            make_key=AsyncMock(return_value="work-center:v2:1:data:test"),
             get=AsyncMock(return_value=None),
             set=AsyncMock(),
-            delete=AsyncMock(),
+            invalidate=AsyncMock(),
         )
         self.service = WorkCenterService(self.uow, self.cache)
 
@@ -48,6 +52,17 @@ class WorkCenterServiceTests(IsolatedAsyncioTestCase):
         self.uow.work_centers.create.assert_awaited_once()
         self.uow.commit.assert_awaited_once()
 
+    async def test_unique_constraint_race_returns_domain_conflict(self):
+        self.uow.work_centers.create.side_effect = IntegrityError(
+            "unique violation", {}, Exception()
+        )
+
+        with self.assertRaises(WorkCenterAlreadyExistsError):
+            await self.service.create("WC-1", "Workshop")
+
+        self.uow.rollback.assert_awaited_once()
+        self.uow.commit.assert_not_awaited()
+
     async def test_cache_hit_avoids_database(self):
         self.cache.get.return_value = {"id": 1}
         self.assertEqual(await self.service.get_by_id(1), {"id": 1})
@@ -57,7 +72,7 @@ class WorkCenterServiceTests(IsolatedAsyncioTestCase):
         result = await self.service.get_by_id(1)
         self.assertEqual(result["identifier"], "WC-1")
         self.assertEqual(result["created_at"], self.center.created_at.isoformat())
-        self.cache.set.assert_awaited_once_with(1, result)
+        self.cache.set.assert_awaited_once_with("work-center:v2:1:data:test", 1, result)
 
     async def test_missing_center_is_not_cached(self):
         self.uow.work_centers.get_by_id.return_value = None
@@ -69,7 +84,7 @@ class WorkCenterServiceTests(IsolatedAsyncioTestCase):
         order = Mock()
         order.attach_mock(self.uow.work_centers.delete, "delete")
         order.attach_mock(self.uow.commit, "commit")
-        order.attach_mock(self.cache.delete, "invalidate")
+        order.attach_mock(self.cache.invalidate, "invalidate")
         self.cache.get.return_value = {"id": 1}
         await self.service.delete(1)
         self.uow.work_centers.delete.assert_awaited_once_with(self.center)
@@ -84,7 +99,7 @@ class WorkCenterServiceTests(IsolatedAsyncioTestCase):
             await self.service.delete(1)
         self.uow.work_centers.delete.assert_not_awaited()
         self.uow.commit.assert_not_awaited()
-        self.cache.delete.assert_not_awaited()
+        self.cache.invalidate.assert_not_awaited()
 
     async def test_missing_center_blocks_deletion_even_with_cached_value(self):
         self.cache.get.return_value = {"id": 1}
@@ -93,10 +108,10 @@ class WorkCenterServiceTests(IsolatedAsyncioTestCase):
             await self.service.delete(1)
         self.uow.work_centers.delete.assert_not_awaited()
         self.uow.commit.assert_not_awaited()
-        self.cache.delete.assert_not_awaited()
+        self.cache.invalidate.assert_not_awaited()
 
     async def test_failed_commit_preserves_cache(self):
         self.uow.commit.side_effect = RuntimeError("commit failed")
         with self.assertRaises(RuntimeError):
             await self.service.delete(1)
-        self.cache.delete.assert_not_awaited()
+        self.cache.invalidate.assert_not_awaited()

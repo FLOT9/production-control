@@ -8,6 +8,7 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationErro
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
 
+from src.application.dto import BatchFilters
 from src.data.models import Batch
 
 logger = logging.getLogger(__name__)
@@ -49,13 +50,9 @@ class BatchListCache:
     async def make_key(
         self,
         *,
-        is_closed: bool | None,
+        filters: BatchFilters,
         offset: int,
         limit: int,
-        batch_number: int | None,
-        batch_date: date | None,
-        work_center_id: int | None,
-        shift: str | None,
     ) -> str | None:
         # Capture the version before SQL so late writes cannot refill a newer version.
         try:
@@ -68,19 +65,19 @@ class BatchListCache:
         except RedisError:
             logger.warning("Cannot read batch list cache version", exc_info=True)
             return None
-        filters = json.dumps(
+        key_data = json.dumps(
             [
-                is_closed,
+                filters.is_closed,
                 offset,
                 limit,
-                batch_number,
-                batch_date.isoformat() if batch_date else None,
-                work_center_id,
-                shift,
+                filters.batch_number,
+                filters.batch_date.isoformat() if filters.batch_date else None,
+                filters.work_center_id,
+                filters.shift,
             ],
             ensure_ascii=False,
         )
-        digest = hashlib.sha256(filters.encode()).hexdigest()
+        digest = hashlib.sha256(key_data.encode()).hexdigest()
         return f"{self.prefix}:{version}:{digest}"
 
     async def get(self, key: str | None) -> tuple[list[dict[str, object]], int] | None:

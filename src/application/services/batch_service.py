@@ -1,7 +1,9 @@
 from datetime import UTC, date, datetime
 from typing import cast
 
-from src.application.dto import BatchProductCounts, BatchStatistics
+from sqlalchemy.exc import IntegrityError
+
+from src.application.dto import BatchFilters, BatchProductCounts, BatchStatistics
 from src.application.events import WebhookEvent, WebhookEventType
 from src.application.services.webhook_event_service import WebhookEventService
 from src.data.models import Batch
@@ -51,11 +53,12 @@ class BatchService:
         self.webhook_event_service = webhook_event_service
 
     async def get_by_id(self, batch_id: int) -> Batch | dict[str, object]:
-        cached = await self.details_cache.get(batch_id)
+        key = await self.details_cache.make_key(batch_id)
+        cached = await self.details_cache.get(key, batch_id)
         if cached is not None:
             return cached
         batch = await self._get_from_db(batch_id)
-        await self.details_cache.set(batch)
+        await self.details_cache.set(key, batch)
         return batch
 
     async def _get_from_db(self, batch_id: int) -> Batch:
@@ -65,8 +68,21 @@ class BatchService:
 
         return batch
 
+    async def _get_for_update(self, batch_id: int) -> Batch:
+        batch = await self.uow.batches.get_by_id_for_update(batch_id)
+        if batch is None:
+            raise BatchNotFoundError(batch_id)
+        return batch
+
+    async def _invalidate_batch_caches(self, batch_id: int) -> None:
+        await self.dashboard_cache.invalidate()
+        await self.list_cache.invalidate()
+        await self.statistics_cache.invalidate(batch_id)
+        await self.details_cache.invalidate(batch_id)
+
     async def get_statistics(self, batch_id: int) -> BatchStatistics:
-        cached = await self.statistics_cache.get(batch_id)
+        key = await self.statistics_cache.make_key(batch_id)
+        cached = await self.statistics_cache.get(key, batch_id)
         if cached is not None:
             return cached
 
@@ -75,7 +91,7 @@ class BatchService:
             raise BatchNotFoundError(batch_id)
 
         statistics = self._build_statistics(counts)
-        await self.statistics_cache.set(statistics)
+        await self.statistics_cache.set(key, statistics)
         return statistics
 
     async def compare_batches(self, batch_ids: list[int]) -> list[BatchStatistics]:
@@ -86,7 +102,8 @@ class BatchService:
         if len(set(batch_ids)) != len(batch_ids):
             raise BatchComparisonInvalidError("Batch IDs must be unique")
 
-        by_id = await self.statistics_cache.get_many(batch_ids)
+        keys = await self.statistics_cache.make_keys(batch_ids)
+        by_id = await self.statistics_cache.get_many(keys)
         missing_ids = [batch_id for batch_id in batch_ids if batch_id not in by_id]
         if missing_ids:
             rows = await self.uow.batches.get_statistics_many(missing_ids)
@@ -94,7 +111,7 @@ class BatchService:
             for batch_id in missing_ids:
                 if batch_id not in loaded:
                     raise BatchNotFoundError(batch_id)
-            await self.statistics_cache.set_many(list(loaded.values()))
+            await self.statistics_cache.set_many(keys, list(loaded.values()))
             by_id.update(loaded)
         return [by_id[batch_id] for batch_id in batch_ids]
 
@@ -120,7 +137,7 @@ class BatchService:
         batch_id: int,
         changes: dict[str, object],
     ) -> Batch:
-        batch = await self._get_from_db(batch_id)
+        batch = await self._get_for_update(batch_id)
 
         if not changes:
             return batch
@@ -185,15 +202,12 @@ class BatchService:
         )
 
         await self.uow.commit()
-        await self.dashboard_cache.invalidate()
-        await self.list_cache.invalidate()
-        await self.statistics_cache.delete(batch_id)
-        await self.details_cache.delete(batch_id)
+        await self._invalidate_batch_caches(batch_id)
         await self.uow.batches.refresh(batch)
         return batch
 
     async def delete(self, batch_id: int) -> None:
-        batch = await self._get_from_db(batch_id)
+        batch = await self._get_for_update(batch_id)
 
         has_products = await self.uow.products.exists_by_batch_id(batch_id)
         if has_products:
@@ -201,10 +215,7 @@ class BatchService:
 
         await self.uow.batches.delete(batch)
         await self.uow.commit()
-        await self.dashboard_cache.invalidate()
-        await self.list_cache.invalidate()
-        await self.statistics_cache.delete(batch_id)
-        await self.details_cache.delete(batch_id)
+        await self._invalidate_batch_caches(batch_id)
 
     async def create(
         self,
@@ -231,18 +242,22 @@ class BatchService:
         if existing_batch is not None:
             raise BatchAlreadyExistsError(batch_number, batch_date)
 
-        saved_batch = await self.uow.batches.create(
-            task_description=task_description,
-            work_center_id=work_center_id,
-            shift=shift,
-            team=team,
-            batch_number=batch_number,
-            batch_date=batch_date,
-            nomenclature=nomenclature,
-            ekn_code=ekn_code,
-            shift_start=shift_start,
-            shift_end=shift_end,
-        )
+        try:
+            saved_batch = await self.uow.batches.create(
+                task_description=task_description,
+                work_center_id=work_center_id,
+                shift=shift,
+                team=team,
+                batch_number=batch_number,
+                batch_date=batch_date,
+                nomenclature=nomenclature,
+                ekn_code=ekn_code,
+                shift_start=shift_start,
+                shift_end=shift_end,
+            )
+        except IntegrityError as error:
+            await self.uow.rollback()
+            raise BatchAlreadyExistsError(batch_number, batch_date) from error
 
         await self.webhook_event_service.create_deliveries(
             WebhookEvent(
@@ -265,43 +280,20 @@ class BatchService:
     async def list_batches(
         self,
         *,
-        is_closed: bool | None,
+        filters: BatchFilters,
         offset: int,
         limit: int,
-        batch_number: int | None,
-        batch_date: date | None,
-        work_center_id: int | None,
-        shift: str | None,
     ) -> tuple[list[Batch] | list[dict[str, object]], int]:
         key = await self.list_cache.make_key(
-            is_closed=is_closed,
-            offset=offset,
-            limit=limit,
-            batch_number=batch_number,
-            batch_date=batch_date,
-            work_center_id=work_center_id,
-            shift=shift,
+            filters=filters, offset=offset, limit=limit
         )
         cached = await self.list_cache.get(key)
         if cached is not None:
             return cached
         batches = await self.uow.batches.find_by_filters(
-            is_closed=is_closed,
-            offset=offset,
-            limit=limit,
-            batch_number=batch_number,
-            batch_date=batch_date,
-            work_center_id=work_center_id,
-            shift=shift,
+            filters=filters, offset=offset, limit=limit
         )
-
-        total = await self.uow.batches.count_by_filters(
-            is_closed=is_closed,
-            batch_number=batch_number,
-            batch_date=batch_date,
-            work_center_id=work_center_id,
-            shift=shift,
-        )
+        total = await self.uow.batches.count_by_filters(filters=filters)
 
         await self.list_cache.set(key, batches, total)
         return batches, total
