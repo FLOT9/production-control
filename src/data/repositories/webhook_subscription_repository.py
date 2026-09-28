@@ -23,7 +23,7 @@ class WebhookSubscriptionRepository(
     ) -> list[WebhookSubscription]:
         statement = select(WebhookSubscription).where(
             WebhookSubscription.is_active.is_(True),
-            WebhookSubscription.events.any(event_type),
+            WebhookSubscription.events.contains([event_type]),
         )
 
         result = await self.session.execute(statement)

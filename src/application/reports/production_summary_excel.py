@@ -69,6 +69,8 @@ class ProductionSummaryExcelGenerator:
     def generate(self, rows: list[ProductionSummaryRow]) -> bytes:
         workbook = Workbook()
         worksheet = workbook.active
+        if not isinstance(worksheet, Worksheet):
+            raise TypeError("Workbook has no active worksheet")
         worksheet.title = "Производственная сводка"
         worksheet.append(HEADERS)
 

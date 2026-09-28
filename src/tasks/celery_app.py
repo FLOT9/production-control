@@ -1,6 +1,14 @@
 from celery import Celery
+from celery.signals import setup_logging
 
 from src.core.config import settings
+from src.core.logging import configure_logging
+
+
+@setup_logging.connect
+def configure_celery_logging(**_kwargs: object) -> None:
+    configure_logging()
+
 
 celery_app = Celery(
     "production_control",

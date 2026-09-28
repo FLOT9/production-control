@@ -82,6 +82,8 @@ class ProductService:
         if product is None:
             raise ProductNotFoundError(unique_code)
         batch = await self.uow.batches.get_by_id_for_update(product.batch_id)
+        if batch is None:
+            raise BatchNotFoundError(product.batch_id)
         if batch.is_closed:
             raise BatchClosedError(product.batch_id)
         if product.is_aggregated:

@@ -21,8 +21,7 @@ async def create_work_center(
     service: WorkCenterServiceDep,
 ) -> WorkCenterRead:
     work_center = await service.create(payload.identifier, payload.name)
-    work_center = WorkCenterRead.model_validate(work_center)
-    return work_center
+    return WorkCenterRead.model_validate(work_center)
 
 
 @router.get(

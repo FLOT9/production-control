@@ -71,7 +71,7 @@ async def export_batches_csv(
 )
 async def batch_export_task_status(task_id: str) -> ReportGenerationTaskStatusRead:
     task_data = await run_in_threadpool(get_task_status, task_id)
-    return ReportGenerationTaskStatusRead(**task_data)
+    return ReportGenerationTaskStatusRead.model_validate(task_data)
 
 
 @router.get("/exports/{report_id}/download")
@@ -213,4 +213,4 @@ async def import_batches_csv(
 )
 async def batch_import_task_status(task_id: str) -> BatchImportTaskStatusRead:
     task_data = await run_in_threadpool(get_task_status, task_id)
-    return BatchImportTaskStatusRead(**task_data)
+    return BatchImportTaskStatusRead.model_validate(task_data)

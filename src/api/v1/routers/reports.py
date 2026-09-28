@@ -42,7 +42,7 @@ async def generate_production_summary() -> ReportGenerationTaskRead:
 )
 async def report_task_status(task_id: str) -> ReportGenerationTaskStatusRead:
     task_data = await run_in_threadpool(get_task_status, task_id)
-    return ReportGenerationTaskStatusRead(**task_data)
+    return ReportGenerationTaskStatusRead.model_validate(task_data)
 
 
 @router.get("/{report_id}/download")

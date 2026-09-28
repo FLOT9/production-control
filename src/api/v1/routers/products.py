@@ -39,8 +39,7 @@ async def create_product(
     service: ProductServiceDep,
 ) -> ProductRead:
     product = await service.create(**payload.model_dump())
-    product = ProductRead.model_validate(product)
-    return product
+    return ProductRead.model_validate(product)
 
 
 @router.patch(
@@ -52,9 +51,7 @@ async def aggregate_product(
     unique_code: str,
 ) -> ProductRead:
     product = await service.aggregate(unique_code=unique_code)
-    product = ProductRead.model_validate(product)
-
-    return product
+    return ProductRead.model_validate(product)
 
 
 @router.post(
@@ -81,4 +78,4 @@ async def aggregate_task_status(
     task_id: str,
 ) -> ProductAggregationTaskStatusRead:
     task_data = await run_in_threadpool(get_task_status, task_id)
-    return ProductAggregationTaskStatusRead(**task_data)
+    return ProductAggregationTaskStatusRead.model_validate(task_data)

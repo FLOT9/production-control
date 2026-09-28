@@ -1,0 +1,37 @@
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: Ruff lint
+        entry: poetry run ruff check .
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: ruff-format
+        name: Ruff format
+        entry: poetry run ruff format --check .
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: mypy
+        name: Mypy
+        entry: poetry run mypy
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: bandit
+        name: Bandit
+        entry: poetry run bandit -q -r src scripts
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: pytest
+        name: Pytest
+        entry: poetry run pytest -q
+        language: system
+        pass_filenames: false
+        always_run: true

@@ -82,7 +82,7 @@ def deliver_webhook(
         retry_delay_seconds = result["retry_delay_seconds"]
         countdown = retry_delay_seconds if isinstance(retry_delay_seconds, int) else 1
         raise self.retry(
-            args=[delivery_id],
+            args=(delivery_id,),
             countdown=countdown,
         )
 

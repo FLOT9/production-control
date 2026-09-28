@@ -25,8 +25,10 @@ def same_rule(current: Rule, expected: Rule) -> bool:
     return (
         current.status == expected.status
         and current.rule_filter is not None
+        and expected.rule_filter is not None
         and current.rule_filter.prefix == expected.rule_filter.prefix
         and current.expiration is not None
+        and expected.expiration is not None
         and current.expiration.days == expected.expiration.days
     )
 
