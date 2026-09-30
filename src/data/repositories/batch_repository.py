@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 
 from sqlalchemy import ColumnElement, exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,6 +16,26 @@ class BatchRepository(BaseRepository[Batch]):
         statement = select(Batch).where(Batch.id == batch_id).with_for_update()
         result = await self.session.execute(statement)
         return result.scalar_one_or_none()
+
+    async def list_expired_ids(
+        self,
+        *,
+        expired_before: datetime,
+        after_id: int,
+        limit: int,
+    ) -> list[int]:
+        statement = (
+            select(Batch.id)
+            .where(
+                Batch.is_closed.is_(False),
+                Batch.shift_end < expired_before,
+                Batch.id > after_id,
+            )
+            .order_by(Batch.id)
+            .limit(limit)
+        )
+        result = await self.session.execute(statement)
+        return list(result.scalars().all())
 
     async def get_by_number_and_date(
         self,

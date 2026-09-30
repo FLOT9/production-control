@@ -1,6 +1,8 @@
 import asyncio
 from dataclasses import asdict
-from datetime import date
+from datetime import UTC, date, datetime
+
+from sqlalchemy.exc import OperationalError
 
 from src.application.dto import BatchFilters
 from src.application.exceptions import BatchCsvFileError, BatchCsvHeadersError
@@ -14,6 +16,30 @@ from src.data.unit_of_work import UnitOfWork
 from src.storage.object_storage import create_object_storage
 from src.storage.redis import create_redis_client
 from src.tasks.celery_app import celery_app
+
+
+async def _auto_close_expired_batches() -> dict[str, int]:
+    expired_before = datetime.now(UTC)
+    client = create_redis_client()
+    try:
+        async with async_session_maker() as session:
+            service = build_batch_service(UnitOfWork(session), client)
+            return await service.close_expired_batches(expired_before=expired_before)
+    finally:
+        try:
+            await client.aclose()
+        finally:
+            await dispose_engine()
+
+
+@celery_app.task(
+    name="batches.auto_close_expired",
+    autoretry_for=(OperationalError,),
+    retry_backoff=True,
+    max_retries=3,
+)
+def auto_close_expired_batches() -> dict[str, int]:
+    return asyncio.run(_auto_close_expired_batches())
 
 
 async def _export_batches_csv(filters: BatchFilters) -> dict[str, str]:

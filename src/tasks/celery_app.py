@@ -1,4 +1,5 @@
 from celery import Celery
+from celery.schedules import crontab
 from celery.signals import setup_logging
 
 from src.core.config import settings
@@ -27,7 +28,7 @@ celery_app.conf.update(
     task_serializer="json",
     accept_content=["json"],
     result_serializer="json",
-    timezone="UTC",
+    timezone=settings.production_timezone,
     enable_utc=True,
     control_queue_exclusive=True,
     event_queue_exclusive=True,
@@ -36,6 +37,10 @@ celery_app.conf.update(
     task_send_sent_event=True,
     result_expires=3600,
     beat_schedule={
+        "auto-close-expired-batches": {
+            "task": "batches.auto_close_expired",
+            "schedule": crontab(hour=1, minute=0),
+        },
         "dispatch-ready-webhooks": {
             "task": "webhooks.dispatch",
             "schedule": 10.0,

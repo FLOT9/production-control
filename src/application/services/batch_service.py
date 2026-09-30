@@ -143,6 +143,44 @@ class BatchService:
         changes: dict[str, object],
     ) -> Batch:
         batch = await self._get_for_update(batch_id)
+        return await self._update_locked(batch, changes)
+
+    async def close_if_expired(self, batch_id: int, expired_before: datetime) -> bool:
+        try:
+            batch = await self._get_for_update(batch_id)
+            if batch.is_closed or batch.shift_end >= expired_before:
+                await self.uow.rollback()
+                return False
+            await self._update_locked(batch, {"is_closed": True})
+        except BatchNotFoundError:
+            await self.uow.rollback()
+            return False
+        except Exception:
+            await self.uow.rollback()
+            raise
+        return True
+
+    async def close_expired_batches(
+        self, *, expired_before: datetime, page_size: int = 200
+    ) -> dict[str, int]:
+        if page_size <= 0:
+            raise ValueError("page_size must be positive")
+        result = {"checked": 0, "closed": 0, "skipped": 0}
+        after_id = 0
+        while True:
+            ids = await self.uow.batches.list_expired_ids(
+                expired_before=expired_before, after_id=after_id, limit=page_size
+            )
+            if not ids:
+                return result
+            for batch_id in ids:
+                closed = await self.close_if_expired(batch_id, expired_before)
+                result["checked"] += 1
+                result["closed" if closed else "skipped"] += 1
+            after_id = ids[-1]
+
+    async def _update_locked(self, batch: Batch, changes: dict[str, object]) -> Batch:
+        batch_id = batch.id
 
         if not changes:
             return batch
