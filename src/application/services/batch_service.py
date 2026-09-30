@@ -3,7 +3,12 @@ from typing import cast
 
 from sqlalchemy.exc import IntegrityError
 
-from src.application.dto import BatchFilters, BatchProductCounts, BatchStatistics
+from src.application.dto import (
+    BatchFilters,
+    BatchIntegrationData,
+    BatchProductCounts,
+    BatchStatistics,
+)
 from src.application.events import WebhookEvent, WebhookEventType
 from src.application.services.webhook_event_service import WebhookEventService
 from src.data.models import Batch
@@ -231,6 +236,87 @@ class BatchService:
         shift_start: datetime,
         shift_end: datetime,
     ) -> Batch:
+        try:
+            saved_batch = await self._create_uncommitted(
+                task_description=task_description,
+                work_center_id=work_center_id,
+                shift=shift,
+                team=team,
+                batch_number=batch_number,
+                batch_date=batch_date,
+                nomenclature=nomenclature,
+                ekn_code=ekn_code,
+                shift_start=shift_start,
+                shift_end=shift_end,
+            )
+            await self.uow.commit()
+        except Exception:
+            await self.uow.rollback()
+            raise
+
+        await self.dashboard_cache.invalidate()
+        await self.list_cache.invalidate()
+        return saved_batch
+
+    async def create_many(self, items: list[BatchIntegrationData]) -> list[Batch]:
+        if not items:
+            return []
+
+        batches: list[Batch] = []
+        work_center_ids: dict[str, int] = {}
+        try:
+            for item in items:
+                identifier = item.work_center_identifier
+                if identifier not in work_center_ids:
+                    work_center = (
+                        await self.uow.work_centers.get_or_create_by_identifier(
+                            identifier=identifier,
+                            name=item.work_center_name,
+                        )
+                    )
+                    work_center_ids[identifier] = work_center.id
+
+                batch = await self._create_uncommitted(
+                    task_description=item.task_description,
+                    work_center_id=work_center_ids[identifier],
+                    shift=item.shift,
+                    team=item.team,
+                    batch_number=item.batch_number,
+                    batch_date=item.batch_date,
+                    nomenclature=item.nomenclature,
+                    ekn_code=item.ekn_code,
+                    shift_start=item.shift_start,
+                    shift_end=item.shift_end,
+                    is_closed=item.is_closed,
+                )
+                batches.append(batch)
+            await self.uow.commit()
+        except Exception:
+            await self.uow.rollback()
+            raise
+
+        await self.dashboard_cache.invalidate()
+        await self.list_cache.invalidate()
+        return batches
+
+    async def _create_uncommitted(
+        self,
+        *,
+        task_description: str,
+        work_center_id: int,
+        shift: str,
+        team: str,
+        batch_number: int,
+        batch_date: date,
+        nomenclature: str,
+        ekn_code: str,
+        shift_start: datetime,
+        shift_end: datetime,
+        is_closed: bool = False,
+    ) -> Batch:
+        if shift_end <= shift_start:
+            raise BatchInvalidShiftPeriodError()
+
         work_center = await self.uow.work_centers.get_by_id(work_center_id)
         if work_center is None:
             raise WorkCenterNotFoundError(work_center_id)
@@ -254,9 +340,10 @@ class BatchService:
                 ekn_code=ekn_code,
                 shift_start=shift_start,
                 shift_end=shift_end,
+                is_closed=is_closed,
+                closed_at=datetime.now(UTC) if is_closed else None,
             )
         except IntegrityError as error:
-            await self.uow.rollback()
             raise BatchAlreadyExistsError(batch_number, batch_date) from error
 
         await self.webhook_event_service.create_deliveries(
@@ -268,13 +355,11 @@ class BatchService:
                     "batch_date": saved_batch.batch_date.isoformat(),
                     "work_center_id": saved_batch.work_center_id,
                     "shift": saved_batch.shift,
+                    "is_closed": saved_batch.is_closed,
                 },
             )
         )
 
-        await self.uow.commit()
-        await self.dashboard_cache.invalidate()
-        await self.list_cache.invalidate()
         return saved_batch
 
     async def list_batches(

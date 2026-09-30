@@ -7,6 +7,7 @@ from src.application.dto.batch_import import (
     BatchImportRowError,
     ParsedBatchImportRow,
 )
+from src.application.dto.batch_integration import BatchIntegrationData
 from src.application.dto.batch_statistics import (
     BatchProductCounts,
     BatchStatistics,
@@ -21,6 +22,7 @@ __all__ = [
     "BatchImportResult",
     "BatchImportRow",
     "BatchImportRowError",
+    "BatchIntegrationData",
     "BatchProductCounts",
     "BatchStatistics",
     "ParsedBatchImportRow",

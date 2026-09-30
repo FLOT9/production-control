@@ -1,9 +1,56 @@
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from typing import Self
+from zoneinfo import ZoneInfo
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 from src.application.dto.batch_import import BatchImportResult
+from src.core.config import settings
+
+
+class BatchIntegrationItem(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+        str_strip_whitespace=True,
+    )
+
+    is_closed: bool = Field(alias="СтатусЗакрытия")
+    task_description: str = Field(
+        alias="ПредставлениеЗаданияНаСмену",
+        min_length=1,
+    )
+    work_center_name: str = Field(alias="РабочийЦентр", min_length=1, max_length=255)
+    work_center_identifier: str = Field(
+        alias="ИдентификаторРЦ", min_length=1, max_length=100
+    )
+    shift: str = Field(alias="Смена", min_length=1, max_length=50)
+    team: str = Field(alias="Бригада", min_length=1, max_length=255)
+    batch_number: int = Field(alias="НомерПартии", gt=0, le=2**31 - 1)
+    batch_date: date = Field(alias="ДатаПартии")
+    nomenclature: str = Field(alias="Номенклатура", min_length=1, max_length=255)
+    ekn_code: str = Field(alias="КодЕКН", min_length=1, max_length=100)
+    shift_start: datetime = Field(alias="ДатаВремяНачалаСмены")
+    shift_end: datetime = Field(alias="ДатаВремяОкончанияСмены")
+
+    @field_validator("shift_start", "shift_end")
+    @classmethod
+    def normalize_shift_time(cls, value: datetime) -> datetime:
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=ZoneInfo(settings.production_timezone))
+        return value.astimezone(UTC)
+
+    @model_validator(mode="after")
+    def validate_shift_period(self) -> Self:
+        if self.shift_end <= self.shift_start:
+            raise ValueError("shift_end must be later than shift_start")
+        return self
 
 
 class BatchBase(BaseModel):

@@ -2,7 +2,16 @@ import uuid
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Body,
+    Depends,
+    File,
+    HTTPException,
+    Query,
+    UploadFile,
+    status,
+)
 from fastapi.responses import RedirectResponse
 from pydantic import Field
 from starlette.concurrency import run_in_threadpool
@@ -10,8 +19,8 @@ from starlette.concurrency import run_in_threadpool
 from src.api.dependencies.batches import BatchFiltersDep, BatchServiceDep
 from src.api.v1.schemas import (
     BatchComparisonRead,
-    BatchCreate,
     BatchImportTaskStatusRead,
+    BatchIntegrationItem,
     BatchListResponse,
     BatchRead,
     BatchStatisticsRead,
@@ -19,6 +28,7 @@ from src.api.v1.schemas import (
     ReportGenerationTaskRead,
     ReportGenerationTaskStatusRead,
 )
+from src.application.dto import BatchIntegrationData
 from src.application.services.report_download_service import ReportDownloadService
 from src.core.config import settings
 from src.core.dependencies import get_report_download_service
@@ -35,15 +45,16 @@ router = APIRouter(
 
 @router.post(
     "",
-    response_model=BatchRead,
+    response_model=list[BatchRead],
     status_code=status.HTTP_201_CREATED,
 )
-async def create_batch(
-    payload: BatchCreate,
+async def create_batches(
+    payload: Annotated[list[BatchIntegrationItem], Body(min_length=1, max_length=1000)],
     service: BatchServiceDep,
-) -> BatchRead:
-    batch = await service.create(**payload.model_dump())
-    return BatchRead.model_validate(batch)
+) -> list[BatchRead]:
+    items = [BatchIntegrationData(**item.model_dump()) for item in payload]
+    batches = await service.create_many(items)
+    return [BatchRead.model_validate(batch) for batch in batches]
 
 
 @router.post(
