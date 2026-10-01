@@ -4,10 +4,13 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from src.api.exception_handlers import register_exception_handlers
+from src.api.middleware.rate_limit import RateLimitMiddleware
 from src.api.v1.routers import api_v1_router
+from src.core.config import settings
 from src.core.database import dispose_engine
 from src.core.logging import configure_logging
-from src.storage.redis import close_redis
+from src.storage.rate_limiter import RedisRateLimiter
+from src.storage.redis import close_redis, redis_client
 
 
 @asynccontextmanager
@@ -27,6 +30,14 @@ app = FastAPI(
 )
 
 register_exception_handlers(app)
+
+app.add_middleware(
+    RateLimitMiddleware,
+    limiter=RedisRateLimiter(redis_client, settings.rate_limit_window_seconds),
+    enabled=settings.rate_limit_enabled,
+    write_limit=settings.rate_limit_write_requests,
+    background_limit=settings.rate_limit_background_requests,
+)
 
 app.include_router(
     api_v1_router,

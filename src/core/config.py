@@ -1,6 +1,6 @@
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -11,6 +11,10 @@ class Settings(BaseSettings):
     celery_broker_url: str
     celery_result_backend: str
     redis_cache_url: str
+    rate_limit_enabled: bool = True
+    rate_limit_window_seconds: int = Field(default=60, gt=0)
+    rate_limit_write_requests: int = Field(default=60, gt=0)
+    rate_limit_background_requests: int = Field(default=10, gt=0)
     work_center_cache_ttl_seconds: int = 60
     batch_statistics_cache_ttl_seconds: int = 300
     dashboard_cache_ttl_seconds: int = 300
