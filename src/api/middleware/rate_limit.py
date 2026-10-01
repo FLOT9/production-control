@@ -1,4 +1,5 @@
 import logging
+import re
 
 from redis.exceptions import RedisError
 from starlette.responses import JSONResponse
@@ -14,6 +15,7 @@ BACKGROUND_PATHS = {
     "/api/v1/products/aggregate-bulk",
     "/api/v1/reports/production-summary",
 }
+BATCH_AGGREGATION_ASYNC_PATH = re.compile(r"/api/v1/batches/[^/]+/aggregate-async")
 
 
 class RateLimitMiddleware:
@@ -43,7 +45,10 @@ class RateLimitMiddleware:
             return
 
         limits = [RateLimit("writes", self.write_limit)]
-        if scope["method"] == "POST" and path in BACKGROUND_PATHS:
+        if scope["method"] == "POST" and (
+            path in BACKGROUND_PATHS
+            or BATCH_AGGREGATION_ASYNC_PATH.fullmatch(path) is not None
+        ):
             limits.append(RateLimit("background", self.background_limit))
 
         # Use the server-resolved peer, never arbitrary forwarded headers.

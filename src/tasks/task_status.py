@@ -17,6 +17,7 @@ def get_task_status(task_id: str) -> dict[str, object]:
     return {
         "task_id": task.id,
         "status": task_status,
+        "progress": task.info if task_status == "PROGRESS" else None,
         "result": task.result if task_status == "SUCCESS" else None,
         "error": error,
     }

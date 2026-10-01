@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from starlette import status
 from starlette.concurrency import run_in_threadpool
 
@@ -49,8 +49,9 @@ async def create_product(
 async def aggregate_product(
     service: ProductServiceDep,
     unique_code: str,
+    batch_id: Annotated[int, Query(gt=0, le=2**31 - 1)],
 ) -> ProductRead:
-    product = await service.aggregate(unique_code=unique_code)
+    product = await service.aggregate(unique_code=unique_code, batch_id=batch_id)
     return ProductRead.model_validate(product)
 
 
@@ -61,10 +62,12 @@ async def aggregate_product(
 )
 async def aggregate_products_bulk(
     payload: ProductAggregationRequest,
+    batch_id: Annotated[int, Query(gt=0, le=2**31 - 1)],
 ) -> ProductAggregationTaskRead:
     task = await run_in_threadpool(
         aggregate_products_task.delay,
-        payload.unique_codes,
+        batch_id=batch_id,
+        unique_codes=payload.unique_codes,
     )
 
     return ProductAggregationTaskRead(task_id=task.id)

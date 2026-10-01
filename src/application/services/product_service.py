@@ -1,4 +1,6 @@
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
+from typing import TypedDict
 
 from sqlalchemy.exc import IntegrityError
 
@@ -8,12 +10,30 @@ from src.data.models import Product
 from src.data.unit_of_work import UnitOfWork
 from src.domain.exceptions.batch import BatchClosedError, BatchNotFoundError
 from src.domain.exceptions.product import (
+    ProductAlreadyAggregatedError,
     ProductAlreadyExistsError,
+    ProductBatchMismatchError,
     ProductNotFoundError,
 )
 from src.storage.batch_details_cache import BatchDetailsCache
 from src.storage.batch_statistics_cache import BatchStatisticsCache
 from src.storage.dashboard_cache import DashboardCache
+
+
+class ProductAggregationError(TypedDict):
+    unique_code: str
+    reason: str
+
+
+class ProductAggregationResult(TypedDict):
+    success: bool
+    total: int
+    aggregated: int
+    failed: int
+    errors: list[ProductAggregationError]
+
+
+ProgressCallback = Callable[[int, int], Awaitable[None]]
 
 
 class ProductService:
@@ -75,23 +95,66 @@ class ProductService:
         await self.details_cache.invalidate(batch_id)
         return saved_product
 
+    async def aggregate_many(
+        self,
+        *,
+        batch_id: int,
+        unique_codes: list[str],
+        on_progress: ProgressCallback | None = None,
+    ) -> ProductAggregationResult:
+        processed: list[str] = []
+        failed: list[ProductAggregationError] = []
+
+        for current, unique_code in enumerate(unique_codes, start=1):
+            try:
+                await self.aggregate(unique_code=unique_code, batch_id=batch_id)
+            except (
+                ProductNotFoundError,
+                ProductBatchMismatchError,
+                ProductAlreadyAggregatedError,
+                BatchNotFoundError,
+                BatchClosedError,
+            ) as error:
+                await self.uow.rollback()
+                failed.append({"unique_code": unique_code, "reason": str(error)})
+            else:
+                processed.append(unique_code)
+
+            if on_progress is not None:
+                await on_progress(current, len(unique_codes))
+
+        return {
+            "success": len(failed) == 0,
+            "total": len(unique_codes),
+            "aggregated": len(processed),
+            "failed": len(failed),
+            "errors": failed,
+        }
+
     async def aggregate(
         self,
         *,
         unique_code: str,
+        batch_id: int,
     ) -> Product:
         product = await self.uow.products.get_by_unique_code_for_update(
             unique_code=unique_code
         )
         if product is None:
             raise ProductNotFoundError(unique_code)
+        if batch_id != product.batch_id:
+            raise ProductBatchMismatchError(
+                unique_code,
+                expected_batch_id=batch_id,
+                actual_batch_id=product.batch_id,
+            )
         batch = await self.uow.batches.get_by_id_for_update(product.batch_id)
         if batch is None:
             raise BatchNotFoundError(product.batch_id)
         if batch.is_closed:
             raise BatchClosedError(product.batch_id)
         if product.is_aggregated:
-            return product
+            raise ProductAlreadyAggregatedError(unique_code)
 
         product.is_aggregated = True
         product.aggregated_at = datetime.now(UTC)

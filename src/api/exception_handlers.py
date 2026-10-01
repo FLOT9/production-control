@@ -16,7 +16,9 @@ from src.domain.exceptions.batch import (
     BatchNotFoundError,
 )
 from src.domain.exceptions.product import (
+    ProductAlreadyAggregatedError,
     ProductAlreadyExistsError,
+    ProductBatchMismatchError,
     ProductNotFoundError,
 )
 from src.domain.exceptions.work_center import (
@@ -36,6 +38,8 @@ ERROR_STATUS_CODES: dict[type[Exception], int] = {
     BatchHasProductsError: status.HTTP_409_CONFLICT,
     BatchInvalidShiftPeriodError: status.HTTP_422_UNPROCESSABLE_CONTENT,
     ProductAlreadyExistsError: status.HTTP_409_CONFLICT,
+    ProductAlreadyAggregatedError: status.HTTP_409_CONFLICT,
+    ProductBatchMismatchError: status.HTTP_409_CONFLICT,
     ProductNotFoundError: status.HTTP_404_NOT_FOUND,
     ReportNotFoundError: status.HTTP_404_NOT_FOUND,
     ObjectStorageUnavailableError: status.HTTP_503_SERVICE_UNAVAILABLE,

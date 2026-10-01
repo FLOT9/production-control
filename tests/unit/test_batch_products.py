@@ -101,9 +101,7 @@ class BatchProductsTests(IsolatedAsyncioTestCase):
                     service = ProductService(
                         uow, AsyncMock(), AsyncMock(), AsyncMock(), details
                     )
-                    kwargs = {"unique_code": "P-001"}
-                    if operation == "create":
-                        kwargs["batch_id"] = 42
+                    kwargs = {"unique_code": "P-001", "batch_id": 42}
                     if fail:
                         with self.assertRaises(RuntimeError):
                             await getattr(service, operation)(**kwargs)

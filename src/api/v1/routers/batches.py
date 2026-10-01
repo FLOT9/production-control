@@ -26,22 +26,60 @@ from src.api.v1.schemas import (
     BatchRead,
     BatchStatisticsRead,
     BatchUpdate,
+    ProductAggregationRequest,
+    ProductAggregationTaskRead,
     ReportGenerationTaskRead,
     ReportGenerationTaskStatusRead,
 )
 from src.application.dto import BatchIntegrationData
+from src.application.services.product_service import (
+    ProductAggregationResult,
+    ProductService,
+)
 from src.application.services.report_download_service import ReportDownloadService
 from src.core.config import settings
-from src.core.dependencies import get_report_download_service
+from src.core.dependencies import get_product_service, get_report_download_service
 from src.storage.object_storage import create_object_storage
 from src.tasks.batch_tasks import export_batches_csv as export_batches_csv_task
 from src.tasks.batch_tasks import import_batches_csv as import_batches_csv_task
+from src.tasks.product_tasks import aggregate_products as aggregate_products_task
 from src.tasks.task_status import get_task_status
 
 router = APIRouter(
     prefix="/batches",
     tags=["batches"],
 )
+
+ProductServiceDep = Annotated[ProductService, Depends(get_product_service)]
+
+
+@router.post("/{batch_id}/aggregate", response_model=dict[str, object])
+async def aggregate_batch_products(
+    batch_id: int,
+    payload: ProductAggregationRequest,
+    service: ProductServiceDep,
+) -> ProductAggregationResult:
+    return await service.aggregate_many(
+        batch_id=batch_id,
+        unique_codes=payload.unique_codes,
+    )
+
+
+@router.post(
+    "/{batch_id}/aggregate-async",
+    response_model=ProductAggregationTaskRead,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def aggregate_batch_products_async(
+    batch_id: int,
+    payload: ProductAggregationRequest,
+) -> ProductAggregationTaskRead:
+    task = await run_in_threadpool(
+        aggregate_products_task.delay,
+        batch_id=batch_id,
+        unique_codes=payload.unique_codes,
+    )
+    return ProductAggregationTaskRead(task_id=task.id)
 
 
 @router.post(
