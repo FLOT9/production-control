@@ -17,6 +17,13 @@ class BatchRepository(BaseRepository[Batch]):
         result = await self.session.execute(statement)
         return result.scalar_one_or_none()
 
+    async def list_ids(self, *, after_id: int, limit: int) -> list[int]:
+        statement = (
+            select(Batch.id).where(Batch.id > after_id).order_by(Batch.id).limit(limit)
+        )
+        result = await self.session.execute(statement)
+        return list(result.scalars().all())
+
     async def list_expired_ids(
         self,
         *,

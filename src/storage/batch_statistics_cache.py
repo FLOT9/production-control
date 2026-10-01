@@ -31,7 +31,7 @@ class BatchStatisticsCache:
     def _generation_key(batch_id: int) -> str:
         return f"batch-statistics:v2:{batch_id}:generation"
 
-    async def make_key(self, batch_id: int) -> str | None:
+    async def make_key(self, batch_id: int, *, strict: bool = False) -> str | None:
         generation_key = self._generation_key(batch_id)
         try:
             generation = await self.client.get(generation_key)
@@ -39,14 +39,23 @@ class BatchStatisticsCache:
                 await self.client.set(generation_key, uuid4().hex, nx=True)
                 generation = await self.client.get(generation_key)
             if generation is None:
+                if strict:
+                    raise RedisError("Statistics cache generation is unavailable")
                 return None
             return f"batch-statistics:v2:{batch_id}:data:{generation}"
         except RedisError:
             logger.warning("Cannot read statistics cache generation", exc_info=True)
+            if strict:
+                raise
             return None
 
-    async def make_keys(self, batch_ids: list[int]) -> dict[int, str | None]:
-        return {batch_id: await self.make_key(batch_id) for batch_id in batch_ids}
+    async def make_keys(
+        self, batch_ids: list[int], *, strict: bool = False
+    ) -> dict[int, str | None]:
+        return {
+            batch_id: await self.make_key(batch_id, strict=strict)
+            for batch_id in batch_ids
+        }
 
     async def get(self, key: str | None, batch_id: int) -> BatchStatistics | None:
         if key is None:
@@ -97,7 +106,11 @@ class BatchStatisticsCache:
         return found
 
     async def set_many(
-        self, keys: dict[int, str | None], statistics: list[BatchStatistics]
+        self,
+        keys: dict[int, str | None],
+        statistics: list[BatchStatistics],
+        *,
+        strict: bool = False,
     ) -> None:
         if not statistics:
             return
@@ -111,11 +124,15 @@ class BatchStatisticsCache:
                     key = keys.get(entry.batch_id)
                     if key is not None:
                         pipeline.set(key, entry.model_dump_json(), ex=self.ttl_seconds)
+                    elif strict:
+                        raise RedisError("Statistics cache key is unavailable")
                 await pipeline.execute()
         except RedisError:
             logger.warning(
                 "Redis unavailable when caching batch statistics", exc_info=True
             )
+            if strict:
+                raise
 
     async def set(self, key: str | None, statistics: BatchStatistics) -> None:
         if key is None:

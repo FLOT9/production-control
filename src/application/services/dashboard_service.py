@@ -23,6 +23,27 @@ class DashboardService:
         cached = await self.cache.get(key)
         if cached is not None:
             return cached
+        summary = await self._read_summary(
+            batch_date=batch_date, work_center_id=work_center_id, shift=shift
+        )
+        await self.cache.set(key, summary)
+        return summary
+
+    async def refresh_summary(
+        self, *, batch_date: date | None = None
+    ) -> DashboardSummary:
+        key = await self.cache.make_key(
+            batch_date=batch_date, work_center_id=None, shift=None, strict=True
+        )
+        summary = await self._read_summary(
+            batch_date=batch_date, work_center_id=None, shift=None
+        )
+        await self.cache.set(key, summary, strict=True)
+        return summary
+
+    async def _read_summary(
+        self, *, batch_date: date | None, work_center_id: int | None, shift: str | None
+    ) -> DashboardSummary:
         counts = await self.uow.dashboard.get_summary(
             batch_date=batch_date,
             work_center_id=work_center_id,
@@ -33,7 +54,7 @@ class DashboardService:
             if counts.total_products
             else 0.0
         )
-        summary = DashboardSummary(
+        return DashboardSummary(
             total_batches=counts.total_batches,
             open_batches=counts.total_batches - counts.closed_batches,
             closed_batches=counts.closed_batches,
@@ -42,5 +63,3 @@ class DashboardService:
             pending_products=counts.total_products - counts.aggregated_products,
             aggregation_percent=round(percent, 2),
         )
-        await self.cache.set(key, summary)
-        return summary

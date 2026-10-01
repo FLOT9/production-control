@@ -21,6 +21,7 @@ celery_app = Celery(
         "src.tasks.report_tasks",
         "src.tasks.batch_tasks",
         "src.tasks.webhook_tasks",
+        "src.tasks.analytics_tasks",
     ],
 )
 
@@ -37,6 +38,10 @@ celery_app.conf.update(
     task_send_sent_event=True,
     result_expires=3600,
     beat_schedule={
+        "update-cached-statistics": {
+            "task": "analytics.update_cached_statistics",
+            "schedule": crontab(minute="*/5"),
+        },
         "auto-close-expired-batches": {
             "task": "batches.auto_close_expired",
             "schedule": crontab(hour=1, minute=0),

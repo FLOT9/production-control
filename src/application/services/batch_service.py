@@ -99,6 +99,15 @@ class BatchService:
         await self.statistics_cache.set(key, statistics)
         return statistics
 
+    async def refresh_statistics(self, batch_ids: list[int]) -> int:
+        if not batch_ids:
+            return 0
+        keys = await self.statistics_cache.make_keys(batch_ids, strict=True)
+        counts = await self.uow.batches.get_statistics_many(batch_ids)
+        statistics = [self._build_statistics(row) for row in counts]
+        await self.statistics_cache.set_many(keys, statistics, strict=True)
+        return len(statistics)
+
     async def compare_batches(self, batch_ids: list[int]) -> list[BatchStatistics]:
         if not 2 <= len(batch_ids) <= 10:
             raise BatchComparisonInvalidError("Provide between 2 and 10 batch IDs")

@@ -23,7 +23,12 @@ class DashboardCache:
         self.prefix = prefix
 
     async def make_key(
-        self, *, batch_date: date | None, work_center_id: int | None, shift: str | None
+        self,
+        *,
+        batch_date: date | None,
+        work_center_id: int | None,
+        shift: str | None,
+        strict: bool = False,
     ) -> str | None:
         # Capture the generation BEFORE reading SQL. Late writes after
         # invalidation remain in the old generation and cannot refill the new one.
@@ -33,9 +38,13 @@ class DashboardCache:
                 await self.client.set(f"{self.prefix}:version", uuid4().hex, nx=True)
                 version = await self.client.get(f"{self.prefix}:version")
             if version is None:
+                if strict:
+                    raise RedisError("Dashboard cache version is unavailable")
                 return None
         except RedisError:
             logger.warning("Cannot read Dashboard cache version", exc_info=True)
+            if strict:
+                raise
             return None
         filters = json.dumps(
             [batch_date.isoformat() if batch_date else None, work_center_id, shift],
@@ -54,14 +63,20 @@ class DashboardCache:
             logger.warning("Cannot read Dashboard cache entry", exc_info=True)
             return None
 
-    async def set(self, key: str | None, summary: DashboardSummary) -> None:
+    async def set(
+        self, key: str | None, summary: DashboardSummary, *, strict: bool = False
+    ) -> None:
         if key is None:
+            if strict:
+                raise RedisError("Dashboard cache key is unavailable")
             return
         value = summary_adapter.dump_json(summary)
         try:
             await self.client.set(key, value, ex=self.ttl_seconds)
         except RedisError:
             logger.warning("Cannot write Dashboard cache entry", exc_info=True)
+            if strict:
+                raise
 
     async def invalidate(self) -> None:
         try:
