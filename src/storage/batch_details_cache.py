@@ -1,7 +1,8 @@
 import logging
+from datetime import datetime
 from uuid import uuid4
 
-from pydantic import ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
 
@@ -9,6 +10,19 @@ from src.data.models import Batch
 from src.storage.batch_list_cache import _BatchEntry
 
 logger = logging.getLogger(__name__)
+
+
+class _ProductEntry(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    unique_code: str
+    is_aggregated: bool
+    aggregated_at: datetime | None
+
+
+class _BatchDetailsEntry(_BatchEntry):
+    products: list[_ProductEntry]
 
 
 class BatchDetailsCache:
@@ -20,7 +34,7 @@ class BatchDetailsCache:
         self.prefix = prefix
 
     def _generation_key(self, batch_id: int) -> str:
-        return f"{self.prefix}:v2:{batch_id}:generation"
+        return f"{self.prefix}:v3:{batch_id}:generation"
 
     async def make_key(self, batch_id: int) -> str | None:
         generation_key = self._generation_key(batch_id)
@@ -35,7 +49,7 @@ class BatchDetailsCache:
             if generation is None:
                 return None
 
-            return f"{self.prefix}:v2:{batch_id}:data:{generation}"
+            return f"{self.prefix}:v3:{batch_id}:data:{generation}"
 
         except RedisError:
             logger.warning(
@@ -53,7 +67,7 @@ class BatchDetailsCache:
             if value is None:
                 return None
 
-            entry = _BatchEntry.model_validate_json(value)
+            entry = _BatchDetailsEntry.model_validate_json(value)
             if entry.id != batch_id:
                 logger.warning("Cached batch ID mismatch for %s", batch_id)
                 return None
@@ -67,7 +81,7 @@ class BatchDetailsCache:
         if key is None:
             return
 
-        entry = _BatchEntry.model_validate(batch)
+        entry = _BatchDetailsEntry.model_validate(batch)
         try:
             await self.client.set(key, entry.model_dump_json(), ex=self.ttl_seconds)
         except RedisError:

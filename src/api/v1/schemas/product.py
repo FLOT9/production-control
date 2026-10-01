@@ -32,6 +32,15 @@ class ProductCreate(ProductBase):
     pass
 
 
+class ProductShort(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    unique_code: str
+    is_aggregated: bool
+    aggregated_at: datetime | None
+
+
 class ProductRead(ProductBase):
     model_config = ConfigDict(
         from_attributes=True,

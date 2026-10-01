@@ -19,6 +19,7 @@ from starlette.concurrency import run_in_threadpool
 from src.api.dependencies.batches import BatchFiltersDep, BatchServiceDep
 from src.api.v1.schemas import (
     BatchComparisonRead,
+    BatchDetailsRead,
     BatchImportTaskStatusRead,
     BatchIntegrationItem,
     BatchListResponse,
@@ -130,14 +131,14 @@ async def get_batch_statistics(
 
 @router.get(
     "/{batch_id}",
-    response_model=BatchRead,
+    response_model=BatchDetailsRead,
 )
 async def get_batch(
     batch_id: int,
     service: BatchServiceDep,
-) -> BatchRead:
+) -> BatchDetailsRead:
     batch = await service.get_by_id(batch_id)
-    return BatchRead.model_validate(batch)
+    return BatchDetailsRead.model_validate(batch)
 
 
 @router.patch(

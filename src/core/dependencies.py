@@ -9,6 +9,7 @@ from src.application.services.webhook_event_service import WebhookEventService
 from src.core.config import settings
 from src.core.database import get_db
 from src.data.unit_of_work import UnitOfWork
+from src.storage.batch_details_cache import BatchDetailsCache
 from src.storage.batch_statistics_cache import BatchStatisticsCache
 from src.storage.dashboard_cache import DashboardCache
 from src.storage.object_storage import create_object_storage
@@ -37,6 +38,7 @@ async def get_product_service(
         ),
         dashboard_cache,
         WebhookEventService(uow),
+        BatchDetailsCache(redis_client, settings.batch_details_cache_ttl_seconds),
     )
 
 

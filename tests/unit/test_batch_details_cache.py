@@ -27,6 +27,7 @@ class FakeRedis:
 def batch(*, is_closed: bool) -> SimpleNamespace:
     now = datetime.now(UTC)
     return SimpleNamespace(
+        products=[],
         id=42,
         task_description="Example",
         work_center_id=1,
@@ -54,7 +55,7 @@ class BatchDetailsCacheTests(unittest.IsolatedAsyncioTestCase):
         database_value = batch(is_closed=False)
         reads = 0
 
-        async def get_by_id(*, instance_id: int) -> SimpleNamespace:
+        async def get_with_products(batch_id: int) -> SimpleNamespace:
             nonlocal database_value, reads
             reads += 1
             row = database_value
@@ -64,7 +65,9 @@ class BatchDetailsCacheTests(unittest.IsolatedAsyncioTestCase):
             return row
 
         service = BatchService(
-            uow=SimpleNamespace(batches=SimpleNamespace(get_by_id=get_by_id)),
+            uow=SimpleNamespace(
+                batches=SimpleNamespace(get_with_products=get_with_products)
+            ),
             statistics_cache=None,
             dashboard_cache=None,
             list_cache=None,

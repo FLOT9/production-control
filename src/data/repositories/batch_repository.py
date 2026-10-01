@@ -2,6 +2,7 @@ from datetime import date, datetime
 
 from sqlalchemy import ColumnElement, exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from src.application.dto import BatchFilters, BatchProductCounts
 from src.data.models import Batch, Product
@@ -14,6 +15,15 @@ class BatchRepository(BaseRepository[Batch]):
 
     async def get_by_id_for_update(self, batch_id: int) -> Batch | None:
         statement = select(Batch).where(Batch.id == batch_id).with_for_update()
+        result = await self.session.execute(statement)
+        return result.scalar_one_or_none()
+
+    async def get_with_products(self, batch_id: int) -> Batch | None:
+        statement = (
+            select(Batch)
+            .where(Batch.id == batch_id)
+            .options(selectinload(Batch.products))
+        )
         result = await self.session.execute(statement)
         return result.scalar_one_or_none()
 

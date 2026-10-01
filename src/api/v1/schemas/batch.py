@@ -11,6 +11,7 @@ from pydantic import (
     model_validator,
 )
 
+from src.api.v1.schemas.product import ProductShort
 from src.application.dto.batch_import import BatchImportResult
 from src.core.config import settings
 
@@ -121,6 +122,10 @@ class BatchRead(BatchBase):
     closed_at: datetime | None
     created_at: datetime
     updated_at: datetime
+
+
+class BatchDetailsRead(BatchRead):
+    products: list[ProductShort]
 
 
 class BatchListResponse(BaseModel):

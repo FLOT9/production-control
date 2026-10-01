@@ -9,6 +9,7 @@ from src.core.database import async_session_maker, dispose_engine
 from src.data.unit_of_work import UnitOfWork
 from src.domain.exceptions.batch import BatchClosedError
 from src.domain.exceptions.product import ProductNotFoundError
+from src.storage.batch_details_cache import BatchDetailsCache
 from src.storage.batch_statistics_cache import BatchStatisticsCache
 from src.storage.dashboard_cache import DashboardCache
 from src.tasks.celery_app import celery_app
@@ -32,6 +33,7 @@ async def _aggregate_products(unique_codes: list[str]) -> dict:
                 ),
                 DashboardCache(client, settings.dashboard_cache_ttl_seconds),
                 WebhookEventService(uow),
+                BatchDetailsCache(client, settings.batch_details_cache_ttl_seconds),
             )
 
             processed: list[str] = []

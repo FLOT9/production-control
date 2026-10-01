@@ -62,15 +62,10 @@ class BatchService:
         cached = await self.details_cache.get(key, batch_id)
         if cached is not None:
             return cached
-        batch = await self._get_from_db(batch_id)
-        await self.details_cache.set(key, batch)
-        return batch
-
-    async def _get_from_db(self, batch_id: int) -> Batch:
-        batch = await self.uow.batches.get_by_id(instance_id=batch_id)
+        batch = await self.uow.batches.get_with_products(batch_id)
         if batch is None:
             raise BatchNotFoundError(batch_id)
-
+        await self.details_cache.set(key, batch)
         return batch
 
     async def _get_for_update(self, batch_id: int) -> Batch:

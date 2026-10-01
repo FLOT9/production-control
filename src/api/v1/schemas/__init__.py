@@ -1,6 +1,7 @@
 from src.api.v1.schemas.batch import (
     BatchComparisonRead,
     BatchCreate,
+    BatchDetailsRead,
     BatchImportTaskStatusRead,
     BatchIntegrationItem,
     BatchListResponse,
@@ -14,6 +15,7 @@ from src.api.v1.schemas.product import (
     ProductAggregationTaskStatusRead,
     ProductCreate,
     ProductRead,
+    ProductShort,
 )
 from src.api.v1.schemas.report import (
     ReportGenerationTaskRead,
@@ -29,6 +31,7 @@ from src.api.v1.schemas.work_center import WorkCenterCreate, WorkCenterRead
 __all__ = [
     "BatchComparisonRead",
     "BatchCreate",
+    "BatchDetailsRead",
     "BatchImportTaskStatusRead",
     "BatchIntegrationItem",
     "BatchListResponse",
@@ -40,6 +43,7 @@ __all__ = [
     "ProductAggregationTaskStatusRead",
     "ProductCreate",
     "ProductRead",
+    "ProductShort",
     "ReportGenerationTaskRead",
     "ReportGenerationTaskStatusRead",
     "WebhookSubscriptionCreate",
