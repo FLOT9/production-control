@@ -4,6 +4,7 @@ from uuid import UUID
 from minio.error import S3Error
 from urllib3.exceptions import HTTPError
 
+from src.application.dto.report_format import ReportFormat, report_extension
 from src.application.exceptions import (
     ObjectStorageUnavailableError,
     ReportNotFoundError,
@@ -27,6 +28,13 @@ class ReportDownloadService:
         return await self._get_download_url(
             report_id,
             f"batch-exports/{report_id}.csv",
+        )
+
+    async def get_batch_report_url(
+        self, batch_id: int, report_id: UUID, format: ReportFormat
+    ) -> str:
+        return await self._get_download_url(
+            report_id, f"batches/{batch_id}/{report_id}.{report_extension(format)}"
         )
 
     async def _get_download_url(self, report_id: UUID, object_name: str) -> str:

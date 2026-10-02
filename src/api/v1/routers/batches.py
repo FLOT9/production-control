@@ -31,7 +31,9 @@ from src.api.v1.schemas import (
     ReportGenerationTaskRead,
     ReportGenerationTaskStatusRead,
 )
+from src.api.v1.schemas.batch_report import BatchReportRequest
 from src.application.dto import BatchIntegrationData
+from src.application.dto.report_format import ReportFormat
 from src.application.services.product_service import (
     ProductAggregationResult,
     ProductService,
@@ -43,6 +45,7 @@ from src.storage.object_storage import create_object_storage
 from src.tasks.batch_tasks import export_batches_csv as export_batches_csv_task
 from src.tasks.batch_tasks import import_batches_csv as import_batches_csv_task
 from src.tasks.product_tasks import aggregate_products as aggregate_products_task
+from src.tasks.report_tasks import generate_batch_report as generate_batch_report_task
 from src.tasks.task_status import get_task_status
 
 router = APIRouter(
@@ -51,6 +54,35 @@ router = APIRouter(
 )
 
 ProductServiceDep = Annotated[ProductService, Depends(get_product_service)]
+
+
+@router.post(
+    "/{batch_id}/reports", response_model=ReportGenerationTaskRead, status_code=202
+)
+async def create_batch_report(
+    batch_id: Annotated[int, Field(gt=0, le=2**31 - 1)],
+    payload: BatchReportRequest,
+    service: BatchServiceDep,
+) -> ReportGenerationTaskRead:
+    await service.get_by_id(batch_id)
+    task = await run_in_threadpool(
+        generate_batch_report_task.delay,
+        batch_id=batch_id,
+        format=payload.format,
+        email=str(payload.email) if payload.email else None,
+    )
+    return ReportGenerationTaskRead(task_id=task.id)
+
+
+@router.get("/{batch_id}/reports/{report_id}/download")
+async def download_batch_report(
+    batch_id: Annotated[int, Field(gt=0, le=2**31 - 1)],
+    report_id: UUID,
+    service: Annotated[ReportDownloadService, Depends(get_report_download_service)],
+    format: ReportFormat = "excel",
+) -> RedirectResponse:
+    url = await service.get_batch_report_url(batch_id, report_id, format)
+    return RedirectResponse(url=url, status_code=307)
 
 
 @router.post("/{batch_id}/aggregate", response_model=dict[str, object])

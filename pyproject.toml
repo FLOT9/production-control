@@ -21,6 +21,9 @@ dependencies = [
     "httpx (>=0.28.1,<0.29.0)",
     "python-multipart (>=0.0.32,<0.0.33)",
     "loguru (>=0.7.3,<0.8.0)",
+    "reportlab (>=5.0.1,<6.0.0)",
+    "matplotlib (>=3.11.2,<4.0.0)",
+    "email-validator (>=2.3.0,<3.0.0)",
 ]
 
 
@@ -36,7 +39,8 @@ dev = [
     "bandit (>=1.9.4,<2.0.0)",
     "pre-commit (>=4.6.2,<5.0.0)",
     "types-openpyxl (>=3.1.5.20260827,<4.0.0.0)",
-    "celery-types (>=0.26.0,<0.27.0)"
+    "celery-types (>=0.26.0,<0.27.0)",
+    "types-reportlab (>=5.0.0.20260911,<6.0.0.0)"
 ]
 
 [tool.mypy]

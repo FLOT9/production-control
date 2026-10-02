@@ -13,6 +13,8 @@ x-app: &app
     MINIO_PUBLIC_ENDPOINT: localhost:9000
     MINIO_ROOT_USER: ${MINIO_ROOT_USER:-production_control}
     MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-local-minio-password}
+    SMTP_HOST: ${SMTP_HOST:-mailpit}
+    SMTP_PORT: ${SMTP_PORT:-1025}
 
 x-app-depends-on: &app-depends-on
   migrate:
@@ -25,6 +27,12 @@ x-app-depends-on: &app-depends-on
     condition: service_completed_successfully
 
 services:
+  mailpit:
+    image: axllent/mailpit:latest
+    ports:
+      - "127.0.0.1:8025:8025"
+      - "127.0.0.1:1025:1025"
+
   migrate:
     <<: *app
     command: ["alembic", "upgrade", "head"]

@@ -41,7 +41,10 @@ class RateLimitMiddlewareTests(IsolatedAsyncioTestCase):
         self.assertIn((b"retry-after", b"12"), start["headers"])
 
     async def test_background_routes_consume_both_limits(self) -> None:
-        for path in BACKGROUND_PATHS | {"/api/v1/batches/42/aggregate-async"}:
+        for path in BACKGROUND_PATHS | {
+            "/api/v1/batches/42/aggregate-async",
+            "/api/v1/batches/42/reports",
+        }:
             with self.subTest(path=path):
                 self.limiter.check.reset_mock()
                 self.scope["path"] = path + "/"

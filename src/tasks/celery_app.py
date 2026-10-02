@@ -22,6 +22,7 @@ celery_app = Celery(
         "src.tasks.batch_tasks",
         "src.tasks.webhook_tasks",
         "src.tasks.analytics_tasks",
+        "src.tasks.email_tasks",
     ],
 )
 

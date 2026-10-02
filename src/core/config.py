@@ -1,6 +1,7 @@
+from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import Field, field_validator
+from pydantic import AnyHttpUrl, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -26,6 +27,14 @@ class Settings(BaseSettings):
     minio_root_password: str = "local-minio-password"
     minio_secure: bool = False
     batch_import_max_file_size_bytes: int = 5 * 1024 * 1024
+    public_api_url: AnyHttpUrl = AnyHttpUrl("http://localhost:8000")
+    smtp_host: str = "localhost"
+    smtp_port: int = Field(default=1025, gt=0, le=65535)
+    smtp_security: Literal["none", "starttls", "ssl"] = "none"
+    smtp_username: str | None = None
+    smtp_password: SecretStr | None = None
+    smtp_from_email: str = "reports@production-control.local"
+    smtp_timeout_seconds: int = Field(default=10, gt=0, le=60)
 
     model_config = SettingsConfigDict(
         env_file=".env",

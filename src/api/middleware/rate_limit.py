@@ -16,6 +16,7 @@ BACKGROUND_PATHS = {
     "/api/v1/reports/production-summary",
 }
 BATCH_AGGREGATION_ASYNC_PATH = re.compile(r"/api/v1/batches/[^/]+/aggregate-async")
+BATCH_REPORT_PATH = re.compile(r"/api/v1/batches/[^/]+/reports")
 
 
 class RateLimitMiddleware:
@@ -48,6 +49,7 @@ class RateLimitMiddleware:
         if scope["method"] == "POST" and (
             path in BACKGROUND_PATHS
             or BATCH_AGGREGATION_ASYNC_PATH.fullmatch(path) is not None
+            or BATCH_REPORT_PATH.fullmatch(path) is not None
         ):
             limits.append(RateLimit("background", self.background_limit))
 
