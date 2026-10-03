@@ -3,6 +3,7 @@ from io import BytesIO
 from zoneinfo import ZoneInfo
 
 from openpyxl import Workbook
+from openpyxl.cell import Cell
 from openpyxl.styles import Font, PatternFill
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
@@ -23,11 +24,15 @@ class BatchExcelGenerator:
 
     @staticmethod
     def _append(sheet: Worksheet, values: list[str | int | float | date]) -> None:
-        sheet.append(values)
-        # User-provided strings must remain text, including codes starting with '='.
-        for cell in sheet[sheet.max_row]:
-            if isinstance(cell.value, str):
+        cells = []
+        for column, value in enumerate(values, start=1):
+            # append() assigns the final row without querying worksheet dimensions.
+            cell = Cell(sheet, row=1, column=column, value=value)
+            # Keep codes starting with '=' as text, without scanning previous rows.
+            if isinstance(value, str):
                 cell.data_type = "s"
+            cells.append(cell)
+        sheet.append(cells)
 
     def generate(self, report: BatchReportData) -> bytes:
         workbook = Workbook()

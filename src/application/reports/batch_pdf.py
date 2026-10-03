@@ -79,6 +79,7 @@ class BatchPdfGenerator:
                 for label, value in rows
             ],
             colWidths=[5 * cm, 12 * cm],
+            splitInRow=1,
         )
         table.setStyle(
             TableStyle(

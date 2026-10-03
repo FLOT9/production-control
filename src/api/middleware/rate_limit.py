@@ -11,6 +11,8 @@ logger = logging.getLogger(__name__)
 WRITE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 BACKGROUND_PATHS = {
     "/api/v1/batches/import/csv",
+    "/api/v1/batches/import",
+    "/api/v1/batches/export",
     "/api/v1/batches/export/csv",
     "/api/v1/products/aggregate-bulk",
     "/api/v1/reports/production-summary",

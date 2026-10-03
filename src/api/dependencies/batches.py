@@ -1,7 +1,7 @@
 from datetime import date
 from typing import Annotated
 
-from fastapi import Depends, Query
+from fastapi import Depends, HTTPException, Query
 
 from src.application.dto import BatchFilters
 from src.application.services.batch_service import BatchService
@@ -17,14 +17,21 @@ def get_batch_filters(
     batch_date: date | None = None,
     work_center_id: int | None = Query(None, gt=0),
     shift: str | None = Query(None, min_length=1, max_length=50),
+    date_from: date | None = None,
+    date_to: date | None = None,
 ) -> BatchFilters:
-    return BatchFilters(
-        is_closed=is_closed,
-        batch_number=batch_number,
-        batch_date=batch_date,
-        work_center_id=work_center_id,
-        shift=shift,
-    )
+    try:
+        return BatchFilters(
+            is_closed=is_closed,
+            batch_number=batch_number,
+            batch_date=batch_date,
+            work_center_id=work_center_id,
+            shift=shift,
+            date_from=date_from,
+            date_to=date_to,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
 
 
 BatchFiltersDep = Annotated[BatchFilters, Depends(get_batch_filters)]

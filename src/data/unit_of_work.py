@@ -1,5 +1,6 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.data.repositories.analytics_repository import AnalyticsRepository
 from src.data.repositories.batch_repository import BatchRepository
 from src.data.repositories.dashboard_repository import DashboardRepository
 from src.data.repositories.product_repository import ProductRepository
@@ -25,6 +26,7 @@ class UnitOfWork:
         self._session = session
         self.work_centers = WorkCenterRepository(session)
         self.batches = BatchRepository(session)
+        self.analytics = AnalyticsRepository(session)
         self.dashboard = DashboardRepository(session)
         self.products = ProductRepository(session)
         self.production_summaries = ProductionSummaryRepository(session)

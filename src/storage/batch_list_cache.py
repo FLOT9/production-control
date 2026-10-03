@@ -65,18 +65,23 @@ class BatchListCache:
         except RedisError:
             logger.warning("Cannot read batch list cache version", exc_info=True)
             return None
-        key_data = json.dumps(
-            [
-                filters.is_closed,
-                offset,
-                limit,
-                filters.batch_number,
-                filters.batch_date.isoformat() if filters.batch_date else None,
-                filters.work_center_id,
-                filters.shift,
-            ],
-            ensure_ascii=False,
-        )
+        key_values = [
+            filters.is_closed,
+            offset,
+            limit,
+            filters.batch_number,
+            filters.batch_date.isoformat() if filters.batch_date else None,
+            filters.work_center_id,
+            filters.shift,
+        ]
+        if filters.date_from is not None or filters.date_to is not None:
+            key_values.extend(
+                [
+                    filters.date_from.isoformat() if filters.date_from else None,
+                    filters.date_to.isoformat() if filters.date_to else None,
+                ]
+            )
+        key_data = json.dumps(key_values, ensure_ascii=False)
         digest = hashlib.sha256(key_data.encode()).hexdigest()
         return f"{self.prefix}:{version}:{digest}"
 

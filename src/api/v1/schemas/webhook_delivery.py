@@ -38,3 +38,8 @@ class WebhookDeliveryDetails(WebhookDeliveryListItem):
     payload: dict[str, Any]
     response_body: str | None
     attempt_history: list[WebhookDeliveryAttemptRead]
+
+
+class WebhookDeliveryPage(BaseModel):
+    items: list[WebhookDeliveryListItem]
+    total: int

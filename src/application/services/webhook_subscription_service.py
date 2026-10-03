@@ -80,3 +80,10 @@ class WebhookSubscriptionService:
 
         subscription.is_active = False
         await self.uow.commit()
+
+    async def list_page(
+        self, *, offset: int, limit: int
+    ) -> tuple[list[WebhookSubscription], int]:
+        return await self.uow.webhook_subscriptions.list_page(
+            offset=offset, limit=limit
+        )

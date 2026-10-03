@@ -1,5 +1,5 @@
 import uuid
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import (
@@ -8,6 +8,7 @@ from fastapi import (
     Depends,
     File,
     HTTPException,
+    Path,
     Query,
     UploadFile,
     status,
@@ -16,6 +17,7 @@ from fastapi.responses import RedirectResponse
 from pydantic import Field
 from starlette.concurrency import run_in_threadpool
 
+from src.api.dependencies.analytics import BatchAnalyticsServiceDep
 from src.api.dependencies.batches import BatchFiltersDep, BatchServiceDep
 from src.api.v1.schemas import (
     BatchComparisonRead,
@@ -31,7 +33,9 @@ from src.api.v1.schemas import (
     ReportGenerationTaskRead,
     ReportGenerationTaskStatusRead,
 )
+from src.api.v1.schemas.analytics import BatchAnalyticsRead
 from src.api.v1.schemas.batch_report import BatchReportRequest
+from src.api.v1.schemas.batch_transfer import BatchExportRequest
 from src.application.dto import BatchIntegrationData
 from src.application.dto.report_format import ReportFormat
 from src.application.services.product_service import (
@@ -43,7 +47,8 @@ from src.core.config import settings
 from src.core.dependencies import get_product_service, get_report_download_service
 from src.storage.object_storage import create_object_storage
 from src.tasks.batch_tasks import export_batches_csv as export_batches_csv_task
-from src.tasks.batch_tasks import import_batches_csv as import_batches_csv_task
+from src.tasks.batch_tasks import export_batches_file as export_batches_file_task
+from src.tasks.batch_tasks import import_batches_file as import_batches_file_task
 from src.tasks.product_tasks import aggregate_products as aggregate_products_task
 from src.tasks.report_tasks import generate_batch_report as generate_batch_report_task
 from src.tasks.task_status import get_task_status
@@ -128,6 +133,50 @@ async def create_batches(
     return [BatchRead.model_validate(batch) for batch in batches]
 
 
+@router.post("/export", response_model=ReportGenerationTaskRead, status_code=202)
+async def export_batches(payload: BatchExportRequest) -> ReportGenerationTaskRead:
+    task = await run_in_threadpool(
+        export_batches_file_task.delay,
+        format=payload.format,
+        filters=payload.filters.model_dump(mode="json"),
+    )
+    return ReportGenerationTaskRead(task_id=task.id)
+
+
+@router.post("/import", response_model=ReportGenerationTaskRead, status_code=202)
+async def import_batches(
+    file: Annotated[UploadFile, File()],
+) -> ReportGenerationTaskRead:
+    filename = (file.filename or "").lower()
+    if filename.endswith(".csv"):
+        format = "csv"
+        extension = "csv"
+        content_type = "text/csv"
+    elif filename.endswith(".xlsx"):
+        format = "excel"
+        extension = "xlsx"
+        content_type = (
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+    else:
+        raise HTTPException(
+            status_code=422, detail="Only .csv and .xlsx files are supported"
+        )
+    data = await file.read(settings.batch_import_max_file_size_bytes + 1)
+    if len(data) > settings.batch_import_max_file_size_bytes:
+        raise HTTPException(status_code=413, detail="File too large")
+    if not data:
+        raise HTTPException(status_code=422, detail="File is empty")
+    object_name = f"batch-imports/{uuid.uuid4().hex}.{extension}"
+    await run_in_threadpool(
+        create_object_storage().upload, "imports", object_name, data, content_type
+    )
+    task = await run_in_threadpool(
+        import_batches_file_task.delay, object_name=object_name, format=format
+    )
+    return ReportGenerationTaskRead(task_id=task.id)
+
+
 @router.post(
     "/export/csv",
     response_model=ReportGenerationTaskRead,
@@ -136,6 +185,11 @@ async def create_batches(
 async def export_batches_csv(
     filters: BatchFiltersDep,
 ) -> ReportGenerationTaskRead:
+    range_filters = {}
+    if filters.date_from:
+        range_filters["date_from"] = filters.date_from.isoformat()
+    if filters.date_to:
+        range_filters["date_to"] = filters.date_to.isoformat()
     task = await run_in_threadpool(
         export_batches_csv_task.delay,
         is_closed=filters.is_closed,
@@ -143,6 +197,7 @@ async def export_batches_csv(
         batch_date=filters.batch_date.isoformat() if filters.batch_date else None,
         work_center_id=filters.work_center_id,
         shift=filters.shift,
+        **range_filters,
     )
     return ReportGenerationTaskRead(task_id=task.id)
 
@@ -163,8 +218,9 @@ async def download_batch_export(
         ReportDownloadService,
         Depends(get_report_download_service),
     ],
+    format: Literal["csv", "excel"] = "csv",
 ) -> RedirectResponse:
-    url = await service.get_batch_export_url(report_id)
+    url = await service.get_batch_export_url(report_id, format)
     return RedirectResponse(
         url=url,
         status_code=status.HTTP_307_TEMPORARY_REDIRECT,
@@ -187,16 +243,12 @@ async def compare_batches(
     )
 
 
-@router.get(
-    "/{batch_id}/statistics",
-    response_model=BatchStatisticsRead,
-)
+@router.get("/{batch_id}/statistics", response_model=BatchAnalyticsRead)
 async def get_batch_statistics(
-    batch_id: int,
-    service: BatchServiceDep,
-) -> BatchStatisticsRead:
-    statistics = await service.get_statistics(batch_id)
-    return BatchStatisticsRead.model_validate(statistics)
+    batch_id: Annotated[int, Path(gt=0, le=2**31 - 1)],
+    service: BatchAnalyticsServiceDep,
+) -> BatchAnalyticsRead:
+    return BatchAnalyticsRead.model_validate(await service.get_statistics(batch_id))
 
 
 @router.get(
@@ -271,22 +323,7 @@ async def list_batches(
 async def import_batches_csv(
     file: Annotated[UploadFile, File()],
 ) -> ReportGenerationTaskRead:
-    data = await file.read(settings.batch_import_max_file_size_bytes + 1)
-    if len(data) > settings.batch_import_max_file_size_bytes:
-        raise HTTPException(status_code=413, detail="File too large")
-    object_name = f"batch-imports/{uuid.uuid4().hex}.csv"
-    storage = create_object_storage()
-
-    await run_in_threadpool(
-        storage.upload,
-        "imports",
-        object_name,
-        data,
-        "text/csv",
-    )
-
-    task = await run_in_threadpool(import_batches_csv_task.delay, object_name)
-    return ReportGenerationTaskRead(task_id=task.id)
+    return await import_batches(file)
 
 
 @router.get(

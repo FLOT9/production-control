@@ -1,3 +1,4 @@
+import logging
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import TypedDict
@@ -18,6 +19,8 @@ from src.domain.exceptions.product import (
 from src.storage.batch_details_cache import BatchDetailsCache
 from src.storage.batch_statistics_cache import BatchStatisticsCache
 from src.storage.dashboard_cache import DashboardCache
+
+logger = logging.getLogger(__name__)
 
 
 class ProductAggregationError(TypedDict):
@@ -121,7 +124,17 @@ class ProductService:
                 processed.append(unique_code)
 
             if on_progress is not None:
-                await on_progress(current, len(unique_codes))
+                try:
+                    await on_progress(current, len(unique_codes))
+                except Exception:
+                    # Progress is advisory; each product already has its own outcome.
+                    logger.warning(
+                        "Cannot publish aggregation progress for batch %s (%s/%s)",
+                        batch_id,
+                        current,
+                        len(unique_codes),
+                        exc_info=True,
+                    )
 
         return {
             "success": len(failed) == 0,

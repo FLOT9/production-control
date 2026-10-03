@@ -56,3 +56,8 @@ class WebhookSubscriptionRead(BaseModel):
     timeout_seconds: int
     created_at: datetime
     updated_at: datetime
+
+
+class WebhookSubscriptionPage(BaseModel):
+    items: list[WebhookSubscriptionRead]
+    total: int

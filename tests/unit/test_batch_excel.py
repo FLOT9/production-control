@@ -2,9 +2,10 @@ from datetime import UTC, datetime
 from io import BytesIO
 from types import SimpleNamespace
 from unittest import IsolatedAsyncioTestCase
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 from openpyxl import load_workbook
+from openpyxl.worksheet.worksheet import Worksheet
 
 from src.application.reports.batch_excel import BatchExcelGenerator
 from src.application.services.batch_report_service import BatchReportService
@@ -52,6 +53,52 @@ class BatchExcelTests(IsolatedAsyncioTestCase):
         self.assertEqual([stats[f"B{i}"].value for i in range(2, 6)], [2, 1, 1, 0.5])
         self.assertEqual(stats["B5"].number_format, "0.00%")
         workbook.close()
+
+    async def test_large_report_has_linear_cell_traversals_and_preserves_rows(self):
+        count = 1000
+        row = batch(is_closed=False)
+        now = datetime(2026, 10, 2, 8, tzinfo=UTC)
+        row.products = [
+            SimpleNamespace(
+                id=index,
+                unique_code="=1+1" if index == 1 else f"P-{index}",
+                is_aggregated=False,
+                aggregated_at=None,
+                created_at=now,
+            )
+            for index in range(1, count + 1)
+        ]
+        service = BatchReportService(
+            SimpleNamespace(
+                batches=SimpleNamespace(get_with_products=AsyncMock(return_value=row))
+            )
+        )
+        report = await service.collect(42)
+        traversed = 0
+
+        class CountingCells(dict):
+            def __iter__(self):
+                nonlocal traversed
+                traversed += len(self)
+                return super().__iter__()
+
+        original_init = Worksheet.__init__
+
+        def initialize(sheet, *args, **kwargs):
+            original_init(sheet, *args, **kwargs)
+            sheet._cells = CountingCells()
+
+        with patch.object(Worksheet, "__init__", initialize):
+            data = BatchExcelGenerator("UTC").generate(report)
+        # Bound total work, without depending on machine speed or wall-clock timing.
+        self.assertLess(traversed, 50 * count * 5)
+        workbook = load_workbook(BytesIO(data))
+        self.addCleanup(workbook.close)
+        products = workbook["Продукция"]
+        self.assertEqual(products.max_row, count + 1)
+        self.assertEqual(products["B2"].value, "=1+1")
+        self.assertEqual(products["B2"].data_type, "s")
+        self.assertEqual(products.cell(count + 1, 2).value, f"P-{count}")
 
     async def test_empty_batch_still_generates_valid_workbook(self):
         service = BatchReportService(

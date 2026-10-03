@@ -1,4 +1,4 @@
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.data.models import WebhookSubscription
@@ -29,3 +29,17 @@ class WebhookSubscriptionRepository(
         result = await self.session.execute(statement)
 
         return list(result.scalars().all())
+
+    async def list_page(
+        self, *, offset: int, limit: int
+    ) -> tuple[list[WebhookSubscription], int]:
+        total = await self.session.scalar(
+            select(func.count()).select_from(WebhookSubscription)
+        )
+        result = await self.session.execute(
+            select(WebhookSubscription)
+            .order_by(WebhookSubscription.id)
+            .offset(offset)
+            .limit(limit)
+        )
+        return list(result.scalars().all()), int(total or 0)

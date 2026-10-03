@@ -9,7 +9,8 @@ from src.application.dto import (
     BatchImportRowError,
     ParsedBatchImportRow,
 )
-from src.application.exceptions import BatchCsvHeadersError
+from src.application.exceptions import BatchCsvFileError, BatchCsvHeadersError
+from src.core.config import settings
 
 REQUIRED_HEADERS = {
     "task_description",
@@ -36,12 +37,19 @@ class BatchCsvParser:
             delimiter=";",
         )
         headers = set(reader.fieldnames or ())
+        if len(reader.fieldnames or ()) != len(headers):
+            raise BatchCsvFileError("CSV contains duplicate headers")
         missing_headers = REQUIRED_HEADERS - headers
 
         if missing_headers:
             raise BatchCsvHeadersError(sorted(missing_headers))
 
-        return list(reader)
+        rows: list[dict[str, str]] = []
+        for row in reader:
+            if len(rows) >= settings.batch_import_max_rows:
+                raise BatchCsvFileError("CSV row limit exceeded")
+            rows.append(row)
+        return rows
 
     def parse(self, data: bytes) -> BatchCsvParseResult:
         raw_rows = self.read_rows(data)

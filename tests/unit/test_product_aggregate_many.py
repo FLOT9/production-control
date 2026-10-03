@@ -2,6 +2,8 @@ from types import SimpleNamespace
 from unittest import IsolatedAsyncioTestCase
 from unittest.mock import AsyncMock
 
+from redis.exceptions import ConnectionError
+
 from src.application.services.product_service import ProductService
 from src.domain.exceptions.batch import BatchClosedError, BatchNotFoundError
 from src.domain.exceptions.product import (
@@ -89,3 +91,25 @@ class ProductAggregateManyTests(IsolatedAsyncioTestCase):
                 batch_id=42, unique_codes=["P1", "P2", "P3"], on_progress=progress
             )
         progress.assert_awaited_once_with(1, 3)
+
+    async def test_progress_failure_does_not_interrupt_product_processing(self) -> None:
+        progress = AsyncMock(
+            side_effect=[ConnectionError("Redis unavailable"), None, None]
+        )
+        self.service.aggregate.side_effect = [None, ProductNotFoundError("P2"), None]
+        with self.assertLogs(
+            "src.application.services.product_service", level="WARNING"
+        ) as logs:
+            result = await self.service.aggregate_many(
+                batch_id=42, unique_codes=["P1", "P2", "P3"], on_progress=progress
+            )
+
+        self.assertEqual(self.service.aggregate.await_count, 3)
+        self.assertEqual(result["aggregated"], 2)
+        self.assertEqual(result["failed"], 1)
+        self.assertEqual(result["errors"][0]["unique_code"], "P2")
+        self.uow.rollback.assert_awaited_once()
+        self.assertEqual(
+            [call.args for call in progress.await_args_list], [(1, 3), (2, 3), (3, 3)]
+        )
+        self.assertIn("progress", logs.output[0])

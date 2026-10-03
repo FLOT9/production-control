@@ -10,6 +10,7 @@ from src.application.dto import (
     BatchStatistics,
 )
 from src.application.events import WebhookEvent, WebhookEventType
+from src.application.events.batch_payload import build_batch_change_payload
 from src.application.services.webhook_event_service import WebhookEventService
 from src.data.models import Batch
 from src.data.unit_of_work import UnitOfWork
@@ -190,6 +191,10 @@ class BatchService:
             return batch
 
         was_closed = batch.is_closed
+        previous = {
+            name: getattr(batch, name)
+            for name in (*UPDATABLE_BATCH_FIELDS, "is_closed", "closed_at")
+        }
 
         work_center_id = cast(
             int,
@@ -233,18 +238,20 @@ class BatchService:
                 else WebhookEventType.BATCH_REOPENED
             )
 
+        if all(old == getattr(batch, name) for name, old in previous.items()):
+            return batch
+
+        statistics = None
+        if event_type == WebhookEventType.BATCH_CLOSED:
+            counts = await self.uow.batches.get_statistics(batch.id)
+            if counts is None:
+                raise BatchNotFoundError(batch.id)
+            statistics = self._build_statistics(counts)
+
         await self.webhook_event_service.create_deliveries(
             WebhookEvent(
                 event_type=event_type,
-                data={
-                    "batch_id": batch.id,
-                    "batch_number": batch.batch_number,
-                    "batch_date": batch.batch_date.isoformat(),
-                    "work_center_id": batch.work_center_id,
-                    "shift": batch.shift,
-                    "is_closed": batch.is_closed,
-                    "changed_fields": sorted(changes),
-                },
+                data=build_batch_change_payload(batch, previous, statistics),
             )
         )
 
@@ -277,6 +284,7 @@ class BatchService:
         ekn_code: str,
         shift_start: datetime,
         shift_end: datetime,
+        is_closed: bool = False,
     ) -> Batch:
         try:
             saved_batch = await self._create_uncommitted(
@@ -290,6 +298,7 @@ class BatchService:
                 ekn_code=ekn_code,
                 shift_start=shift_start,
                 shift_end=shift_end,
+                is_closed=is_closed,
             )
             await self.uow.commit()
         except Exception:

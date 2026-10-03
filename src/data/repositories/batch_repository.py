@@ -124,6 +124,10 @@ class BatchRepository(BaseRepository[Batch]):
 
         if filters.batch_date is not None:
             conditions.append(Batch.batch_date == filters.batch_date)
+        if filters.date_from is not None:
+            conditions.append(Batch.batch_date >= filters.date_from)
+        if filters.date_to is not None:
+            conditions.append(Batch.batch_date <= filters.date_to)
 
         if filters.work_center_id is not None:
             conditions.append(Batch.work_center_id == filters.work_center_id)

@@ -78,8 +78,14 @@ class BatchImportStatusTests(TestCase):
     def test_file_error_is_visible_in_failed_status(self, async_result):
         async_result.return_value = SimpleNamespace(
             id="task-1",
-            status="FAILURE",
-            result=BatchCsvFileError("CSV must be UTF-8 encoded"),
+            backend=SimpleNamespace(
+                get_task_meta=MagicMock(
+                    return_value={
+                        "status": "FAILURE",
+                        "result": BatchCsvFileError("CSV must be UTF-8 encoded"),
+                    }
+                )
+            ),
         )
 
         response = BatchImportTaskStatusRead(**get_task_status("task-1"))
@@ -92,8 +98,14 @@ class BatchImportStatusTests(TestCase):
     def test_internal_error_is_not_exposed(self, async_result):
         async_result.return_value = SimpleNamespace(
             id="task-1",
-            status="FAILURE",
-            result=RuntimeError("secret database URL"),
+            backend=SimpleNamespace(
+                get_task_meta=MagicMock(
+                    return_value={
+                        "status": "FAILURE",
+                        "result": RuntimeError("secret database URL"),
+                    }
+                )
+            ),
         )
 
         response = BatchImportTaskStatusRead(**get_task_status("task-1"))

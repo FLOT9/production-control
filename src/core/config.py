@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     minio_root_password: str = "local-minio-password"
     minio_secure: bool = False
     batch_import_max_file_size_bytes: int = 5 * 1024 * 1024
+    batch_import_max_rows: int = Field(default=10000, gt=0)
+    batch_import_max_uncompressed_bytes: int = Field(default=50 * 1024 * 1024, gt=0)
     public_api_url: AnyHttpUrl = AnyHttpUrl("http://localhost:8000")
     smtp_host: str = "localhost"
     smtp_port: int = Field(default=1025, gt=0, le=65535)

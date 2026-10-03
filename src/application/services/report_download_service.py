@@ -1,4 +1,5 @@
 from asyncio import to_thread
+from typing import Literal
 from uuid import UUID
 
 from minio.error import S3Error
@@ -24,11 +25,23 @@ class ReportDownloadService:
             f"production-summary/{report_id}.xlsx",
         )
 
-    async def get_batch_export_url(self, report_id: UUID) -> str:
-        return await self._get_download_url(
-            report_id,
-            f"batch-exports/{report_id}.csv",
+    async def get_batch_export_url(
+        self, report_id: UUID, format: Literal["csv", "excel"] = "csv"
+    ) -> str:
+        object_name = (
+            f"batch-exports/{report_id}.{'csv' if format == 'csv' else 'xlsx'}"
         )
+        try:
+            return await self._get_download_url(
+                report_id, object_name, bucket="exports"
+            )
+        except ReportNotFoundError:
+            if format != "csv":
+                raise
+            # CSV exports generated before the bucket correction remain downloadable.
+            return await self._get_download_url(
+                report_id, object_name, bucket="reports"
+            )
 
     async def get_batch_report_url(
         self, batch_id: int, report_id: UUID, format: ReportFormat
@@ -37,17 +50,19 @@ class ReportDownloadService:
             report_id, f"batches/{batch_id}/{report_id}.{report_extension(format)}"
         )
 
-    async def _get_download_url(self, report_id: UUID, object_name: str) -> str:
+    async def _get_download_url(
+        self, report_id: UUID, object_name: str, bucket: str = REPORTS_BUCKET
+    ) -> str:
 
         try:
             await to_thread(
                 self.object_storage.check_exists,
-                REPORTS_BUCKET,
+                bucket,
                 object_name,
             )
             return await to_thread(
                 self.object_storage.download_url,
-                REPORTS_BUCKET,
+                bucket,
                 object_name,
             )
         except S3Error as error:

@@ -1,6 +1,6 @@
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import or_, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -95,3 +95,19 @@ class WebhookDeliveryRepository(
 
         result = await self.session.execute(statement)
         return list(result.scalars().all())
+
+    async def list_by_subscription(
+        self, subscription_id: int, *, offset: int, limit: int
+    ) -> tuple[list[WebhookDelivery], int]:
+        condition = WebhookDelivery.subscription_id == subscription_id
+        total = await self.session.scalar(
+            select(func.count()).select_from(WebhookDelivery).where(condition)
+        )
+        result = await self.session.execute(
+            select(WebhookDelivery)
+            .where(condition)
+            .order_by(WebhookDelivery.created_at.desc(), WebhookDelivery.id.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+        return list(result.scalars().all()), int(total or 0)

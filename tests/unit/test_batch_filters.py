@@ -76,6 +76,12 @@ class BatchFilterRepositoryTests(IsolatedAsyncioTestCase):
             (BatchFilters(batch_date=date(2026, 9, 27)), [3]),
             (BatchFilters(work_center_id=2), []),
             (BatchFilters(shift="night"), [3]),
+            (BatchFilters(date_from=date(2026, 9, 28)), [2, 1]),
+            (BatchFilters(date_to=date(2026, 9, 27)), [3]),
+            (
+                BatchFilters(date_from=date(2026, 9, 27), date_to=date(2026, 9, 28)),
+                [2, 1, 3],
+            ),
             (BatchFilters(False, 2, date(2026, 9, 28), 1, "day"), [2]),
             (BatchFilters(is_closed=False, shift="night"), []),
         ]

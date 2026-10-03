@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
+from src.application.dto.batch_statistics import BatchProductCounts
 from src.application.events import WebhookEventType
 from src.application.services.batch_service import BatchService
 from src.data.models import Batch, WorkCenter
@@ -45,6 +46,7 @@ class AutoCloseServiceTests(IsolatedAsyncioTestCase):
             batches=SimpleNamespace(
                 get_by_id_for_update=AsyncMock(return_value=self.row),
                 refresh=AsyncMock(),
+                get_statistics=AsyncMock(return_value=BatchProductCounts(1, 3, 2)),
             ),
             commit=AsyncMock(side_effect=lambda: self.operations.append("commit")),
             rollback=AsyncMock(),
@@ -83,6 +85,10 @@ class AutoCloseServiceTests(IsolatedAsyncioTestCase):
         )
         event = self.events.create_deliveries.await_args.args[0]
         self.assertEqual(event.event_type, WebhookEventType.BATCH_CLOSED)
+        self.assertEqual(event.data["statistics"]["aggregation_percent"], 66.67)
+        self.assertEqual(
+            event.data["changes"]["is_closed"], {"old": False, "new": True}
+        )
         self.assertFalse(await self.service.close_if_expired(1, CUTOFF))
         self.events.create_deliveries.assert_awaited_once()
         self.uow.commit.assert_awaited_once()

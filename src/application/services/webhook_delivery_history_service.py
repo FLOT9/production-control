@@ -1,4 +1,7 @@
-from src.application.exceptions import WebhookDeliveryNotFoundError
+from src.application.exceptions import (
+    WebhookDeliveryNotFoundError,
+    WebhookSubscriptionNotFoundError,
+)
 from src.data.models import WebhookDelivery
 from src.data.unit_of_work import UnitOfWork
 
@@ -19,3 +22,12 @@ class WebhookDeliveryHistoryService:
         if delivery is None:
             raise WebhookDeliveryNotFoundError(delivery_id)
         return delivery
+
+    async def list_subscription_deliveries(
+        self, subscription_id: int, *, offset: int, limit: int
+    ) -> tuple[list[WebhookDelivery], int]:
+        if await self.uow.webhook_subscriptions.get_by_id(subscription_id) is None:
+            raise WebhookSubscriptionNotFoundError(subscription_id)
+        return await self.uow.webhook_deliveries.list_by_subscription(
+            subscription_id, offset=offset, limit=limit
+        )
