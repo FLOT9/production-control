@@ -26,8 +26,10 @@ from src.domain.exceptions.work_center import (
     WorkCenterHasBatchesError,
     WorkCenterNotFoundError,
 )
+from src.integrations.webhooks.url_policy import UnsafeWebhookUrlError
 
 ERROR_STATUS_CODES: dict[type[Exception], int] = {
+    UnsafeWebhookUrlError: status.HTTP_422_UNPROCESSABLE_CONTENT,
     WorkCenterAlreadyExistsError: status.HTTP_409_CONFLICT,
     WorkCenterNotFoundError: status.HTTP_404_NOT_FOUND,
     WorkCenterHasBatchesError: status.HTTP_409_CONFLICT,

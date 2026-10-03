@@ -1,4 +1,8 @@
-from src.application.exceptions import BatchCsvFileError, BatchExportFileError
+from src.application.exceptions import (
+    BatchCsvFileError,
+    BatchExportFileError,
+    ProductionSummaryEmptyError,
+)
 from src.tasks.celery_app import celery_app
 
 
@@ -13,7 +17,10 @@ def get_task_status(task_id: str) -> dict[str, object]:
     if task_status == "FAILURE":
         error = (
             str(task_result)
-            if isinstance(task_result, BatchCsvFileError | BatchExportFileError)
+            if isinstance(
+                task_result,
+                BatchCsvFileError | BatchExportFileError | ProductionSummaryEmptyError,
+            )
             else "Task failed; check worker logs"
         )
 

@@ -59,13 +59,17 @@ class BatchService:
         self.webhook_event_service = webhook_event_service
 
     async def get_by_id(self, batch_id: int) -> Batch | dict[str, object]:
-        key = await self.details_cache.make_key(batch_id)
+        key = await self.details_cache.make_key(batch_id, create=False)
         cached = await self.details_cache.get(key, batch_id)
         if cached is not None:
             return cached
         batch = await self.uow.batches.get_with_products(batch_id)
         if batch is None:
             raise BatchNotFoundError(batch_id)
+        if key is None:
+            # Bootstrap only after existence is confirmed. Cache the next SQL read,
+            # whose generation will be captured before that read.
+            await self.details_cache.make_key(batch_id)
         await self.details_cache.set(key, batch)
         return batch
 
@@ -82,7 +86,7 @@ class BatchService:
         await self.details_cache.invalidate(batch_id)
 
     async def get_statistics(self, batch_id: int) -> BatchStatistics:
-        key = await self.statistics_cache.make_key(batch_id)
+        key = await self.statistics_cache.make_key(batch_id, create=False)
         cached = await self.statistics_cache.get(key, batch_id)
         if cached is not None:
             return cached
@@ -92,14 +96,27 @@ class BatchService:
             raise BatchNotFoundError(batch_id)
 
         statistics = self._build_statistics(counts)
+        if key is None:
+            await self.statistics_cache.make_key(batch_id)
         await self.statistics_cache.set(key, statistics)
         return statistics
 
     async def refresh_statistics(self, batch_ids: list[int]) -> int:
         if not batch_ids:
             return 0
-        keys = await self.statistics_cache.make_keys(batch_ids, strict=True)
+        keys = await self.statistics_cache.make_keys(
+            batch_ids, strict=True, create=False
+        )
         counts = await self.uow.batches.get_statistics_many(batch_ids)
+        uninitialized = [row.batch_id for row in counts if keys[row.batch_id] is None]
+        if uninitialized:
+            keys.update(
+                await self.statistics_cache.make_keys(uninitialized, strict=True)
+            )
+            # Never cache SQL results read before their generation was captured.
+            counts = await self.uow.batches.get_statistics_many(
+                [row.batch_id for row in counts]
+            )
         statistics = [self._build_statistics(row) for row in counts]
         await self.statistics_cache.set_many(keys, statistics, strict=True)
         return len(statistics)
@@ -112,7 +129,7 @@ class BatchService:
         if len(set(batch_ids)) != len(batch_ids):
             raise BatchComparisonInvalidError("Batch IDs must be unique")
 
-        keys = await self.statistics_cache.make_keys(batch_ids)
+        keys = await self.statistics_cache.make_keys(batch_ids, create=False)
         by_id = await self.statistics_cache.get_many(keys)
         missing_ids = [batch_id for batch_id in batch_ids if batch_id not in by_id]
         if missing_ids:
@@ -121,6 +138,9 @@ class BatchService:
             for batch_id in missing_ids:
                 if batch_id not in loaded:
                     raise BatchNotFoundError(batch_id)
+            await self.statistics_cache.make_keys(
+                [i for i in loaded if keys[i] is None]
+            )
             await self.statistics_cache.set_many(keys, list(loaded.values()))
             by_id.update(loaded)
         return [by_id[batch_id] for batch_id in batch_ids]

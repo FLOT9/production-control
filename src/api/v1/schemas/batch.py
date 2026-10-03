@@ -11,8 +11,9 @@ from pydantic import (
     model_validator,
 )
 
+from src.api.v1.schemas.common import PositiveInt32
 from src.api.v1.schemas.product import ProductShort
-from src.application.dto.batch_import import BatchImportResult
+from src.api.v1.schemas.task import TaskStatusRead
 from src.core.config import settings
 
 
@@ -33,7 +34,7 @@ class BatchIntegrationItem(BaseModel):
     )
     shift: str = Field(alias="Смена", min_length=1, max_length=50)
     team: str = Field(alias="Бригада", min_length=1, max_length=255)
-    batch_number: int = Field(alias="НомерПартии", gt=0, le=2**31 - 1)
+    batch_number: PositiveInt32 = Field(alias="НомерПартии")
     batch_date: date = Field(alias="ДатаПартии")
     nomenclature: str = Field(alias="Номенклатура", min_length=1, max_length=255)
     ekn_code: str = Field(alias="КодЕКН", min_length=1, max_length=100)
@@ -58,10 +59,10 @@ class BatchBase(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     task_description: str = Field(min_length=1)
-    work_center_id: int = Field(gt=0)
+    work_center_id: PositiveInt32
     shift: str = Field(min_length=1, max_length=50)
     team: str = Field(min_length=1, max_length=255)
-    batch_number: int = Field(gt=0)
+    batch_number: PositiveInt32
     batch_date: date
     nomenclature: str = Field(min_length=1, max_length=255)
     ekn_code: str = Field(min_length=1, max_length=100)
@@ -83,10 +84,10 @@ class BatchUpdate(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     task_description: str | None = Field(default=None, min_length=1)
-    work_center_id: int | None = Field(default=None, gt=0)
+    work_center_id: PositiveInt32 | None = None
     shift: str | None = Field(default=None, min_length=1, max_length=50)
     team: str | None = Field(default=None, min_length=1, max_length=255)
-    batch_number: int | None = Field(default=None, gt=0)
+    batch_number: PositiveInt32 | None = None
     batch_date: date | None = None
     nomenclature: str | None = Field(default=None, min_length=1, max_length=255)
     ekn_code: str | None = Field(default=None, min_length=1, max_length=100)
@@ -149,8 +150,5 @@ class BatchComparisonRead(BaseModel):
     items: list[BatchStatisticsRead]
 
 
-class BatchImportTaskStatusRead(BaseModel):
-    task_id: str
-    status: str
-    result: BatchImportResult | None = None
-    error: str | None = None
+class BatchImportTaskStatusRead(TaskStatusRead):
+    pass

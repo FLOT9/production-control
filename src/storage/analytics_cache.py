@@ -48,9 +48,9 @@ class AnalyticsCache(Generic[T]):
         ).hexdigest()
         return f"{base}:analytics:v1:{digest}"
 
-    async def batch_key(self, batch_id: int) -> str | None:
+    async def batch_key(self, batch_id: int, *, create: bool = True) -> str | None:
         base = await BatchStatisticsCache(self.client, self.ttl_seconds).make_key(
-            batch_id
+            batch_id, create=create
         )
         return f"{base}:analytics:v1" if base is not None else None
 

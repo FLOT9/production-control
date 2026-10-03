@@ -15,6 +15,9 @@ class FakeRedis:
     async def get(self, key: str) -> str | None:
         return self.values.get(key)
 
+    async def expire(self, key: str, seconds: int, *, nx: bool = False) -> bool:
+        return key in self.values
+
     async def set(
         self, key: str, value: str, *, nx: bool = False, ex: int | None = None
     ) -> bool:
@@ -75,6 +78,7 @@ class BatchDetailsCacheTests(unittest.IsolatedAsyncioTestCase):
             webhook_event_service=None,
         )
 
+        await cache.make_key(42)
         old_read = asyncio.create_task(service.get_by_id(42))
         await first_read_started.wait()
         old_key = await cache.make_key(42)

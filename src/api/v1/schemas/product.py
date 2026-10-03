@@ -9,23 +9,24 @@ from pydantic import (
     field_validator,
 )
 
+from src.api.v1.schemas.common import PositiveInt32
+from src.api.v1.schemas.task import TaskStatusRead
+
 
 class ProductAggregationTaskRead(BaseModel):
     task_id: str
     status: Literal["queued"] = "queued"
 
 
-class ProductAggregationTaskStatusRead(BaseModel):
-    task_id: str
-    status: str
-    result: dict | None = None
+class ProductAggregationTaskStatusRead(TaskStatusRead):
+    pass
 
 
 class ProductBase(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     unique_code: str = Field(min_length=1, max_length=255)
-    batch_id: int = Field(gt=0)
+    batch_id: PositiveInt32
 
 
 class ProductCreate(ProductBase):
@@ -64,7 +65,7 @@ ProductCode = Annotated[
 
 
 class ProductAggregationRequest(BaseModel):
-    unique_codes: list[ProductCode] = Field(min_length=1)
+    unique_codes: list[ProductCode] = Field(min_length=1, max_length=1000)
 
     @field_validator("unique_codes")
     @classmethod

@@ -1,9 +1,11 @@
+import asyncio
 from dataclasses import dataclass
 from time import perf_counter
 
 import httpx
 
 from src.integrations.webhooks.exceptions import WebhookHttpError
+from src.integrations.webhooks.url_policy import UnsafeWebhookUrlError, resolve_target
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,19 +30,38 @@ class WebhookHttpClient:
         started_at = perf_counter()
 
         try:
-            async with httpx.AsyncClient(
-                follow_redirects=False,
-            ) as client:
-                response = await client.post(
-                    url,
-                    content=body,
-                    headers={
-                        "Content-Type": "application/json",
-                        **headers,
-                    },
-                    timeout=timeout_seconds,
+            targets, authority, hostname = await resolve_target(url)
+            async with (
+                httpx.AsyncClient(
+                    follow_redirects=False,
+                    trust_env=False,
+                ) as client,
+                asyncio.timeout(timeout_seconds),
+            ):
+                # Reserve connection time for every validated address.
+                timeout = httpx.Timeout(
+                    timeout_seconds, connect=timeout_seconds / len(targets)
                 )
-        except httpx.RequestError as error:
+                for index, target in enumerate(targets):
+                    try:
+                        response = await client.post(
+                            target,
+                            content=body,
+                            headers={
+                                "Content-Type": "application/json",
+                                **headers,
+                                "Host": authority,
+                            },
+                            timeout=timeout,
+                            extensions={"sni_hostname": hostname},
+                        )
+                    except (httpx.ConnectError, httpx.ConnectTimeout):
+                        # These errors occur before HTTP headers/body are sent.
+                        if index == len(targets) - 1:
+                            raise
+                    else:
+                        break
+        except (httpx.RequestError, UnsafeWebhookUrlError, TimeoutError) as error:
             duration_ms = round((perf_counter() - started_at) * 1000)
             raise WebhookHttpError(
                 message=f"{type(error).__name__}: {error}",

@@ -1,14 +1,13 @@
-from typing import Annotated, Self
+from typing import Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from src.api.v1.schemas.common import PositiveInt32
 from src.application.dto.analytics import (
     BatchAnalytics,
     BatchComparison,
     DashboardAnalytics,
 )
-
-PositiveInt32 = Annotated[int, Field(gt=0, le=2**31 - 1)]
 
 
 class BatchComparisonRequest(BaseModel):

@@ -4,6 +4,7 @@ from src.api.dependencies.work_centers import (
     WorkCenterServiceDep,
 )
 from src.api.v1.schemas import WorkCenterCreate, WorkCenterRead
+from src.api.v1.schemas.common import PositiveInt32Path
 
 router = APIRouter(
     prefix="/work-centers",
@@ -29,7 +30,7 @@ async def create_work_center(
     response_model=WorkCenterRead,
 )
 async def get_work_center(
-    work_center_id: int,
+    work_center_id: PositiveInt32Path,
     service: WorkCenterServiceDep,
 ) -> WorkCenterRead:
     work_center = await service.get_by_id(work_center_id)
@@ -41,7 +42,7 @@ async def get_work_center(
     status_code=status.HTTP_204_NO_CONTENT,
 )
 async def delete_work_center(
-    work_center_id: int,
+    work_center_id: PositiveInt32Path,
     service: WorkCenterServiceDep,
 ) -> None:
     await service.delete(work_center_id)

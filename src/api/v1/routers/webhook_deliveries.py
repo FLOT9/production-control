@@ -1,8 +1,9 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Path, Query
+from fastapi import APIRouter, Query
 
 from src.api.dependencies.webhooks import WebhookDeliveryHistoryServiceDep
+from src.api.v1.schemas.common import PositiveInt32Path
 from src.api.v1.schemas.webhook_delivery import (
     WebhookDeliveryDetails,
     WebhookDeliveryListItem,
@@ -23,7 +24,7 @@ async def list_webhook_deliveries(
 
 @router.get("/{delivery_id}", response_model=WebhookDeliveryDetails)
 async def get_webhook_delivery(
-    delivery_id: Annotated[int, Path(gt=0)],
+    delivery_id: PositiveInt32Path,
     service: WebhookDeliveryHistoryServiceDep,
 ) -> WebhookDeliveryDetails:
     delivery = await service.get_by_id(delivery_id)

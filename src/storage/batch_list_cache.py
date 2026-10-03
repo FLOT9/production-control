@@ -10,6 +10,7 @@ from redis.exceptions import RedisError
 
 from src.application.dto import BatchFilters
 from src.data.models import Batch
+from src.storage.cache_generation import read_generation
 
 logger = logging.getLogger(__name__)
 
@@ -56,10 +57,9 @@ class BatchListCache:
     ) -> str | None:
         # Capture the version before SQL so late writes cannot refill a newer version.
         try:
-            version = await self.client.get(f"{self.prefix}:version")
-            if version is None:
-                await self.client.set(f"{self.prefix}:version", uuid4().hex, nx=True)
-                version = await self.client.get(f"{self.prefix}:version")
+            version = await read_generation(
+                self.client, f"{self.prefix}:version", self.ttl_seconds
+            )
             if version is None:
                 return None
         except RedisError:
@@ -111,6 +111,8 @@ class BatchListCache:
 
     async def invalidate(self) -> None:
         try:
-            await self.client.set(f"{self.prefix}:version", uuid4().hex)
+            await self.client.set(
+                f"{self.prefix}:version", uuid4().hex, ex=self.ttl_seconds * 2
+            )
         except RedisError:
             logger.warning("Cannot invalidate batch list cache", exc_info=True)

@@ -6,6 +6,7 @@ from redis.asyncio import Redis
 from redis.exceptions import RedisError
 
 from src.application.dto import BatchStatistics
+from src.storage.cache_generation import read_generation
 
 logger = logging.getLogger(__name__)
 
@@ -31,15 +32,16 @@ class BatchStatisticsCache:
     def _generation_key(batch_id: int) -> str:
         return f"batch-statistics:v2:{batch_id}:generation"
 
-    async def make_key(self, batch_id: int, *, strict: bool = False) -> str | None:
+    async def make_key(
+        self, batch_id: int, *, strict: bool = False, create: bool = True
+    ) -> str | None:
         generation_key = self._generation_key(batch_id)
         try:
-            generation = await self.client.get(generation_key)
+            generation = await read_generation(
+                self.client, generation_key, self.ttl_seconds, create=create
+            )
             if generation is None:
-                await self.client.set(generation_key, uuid4().hex, nx=True)
-                generation = await self.client.get(generation_key)
-            if generation is None:
-                if strict:
+                if strict and create:
                     raise RedisError("Statistics cache generation is unavailable")
                 return None
             return f"batch-statistics:v2:{batch_id}:data:{generation}"
@@ -50,10 +52,10 @@ class BatchStatisticsCache:
             return None
 
     async def make_keys(
-        self, batch_ids: list[int], *, strict: bool = False
+        self, batch_ids: list[int], *, strict: bool = False, create: bool = True
     ) -> dict[int, str | None]:
         return {
-            batch_id: await self.make_key(batch_id, strict=strict)
+            batch_id: await self.make_key(batch_id, strict=strict, create=create)
             for batch_id in batch_ids
         }
 
@@ -156,7 +158,9 @@ class BatchStatisticsCache:
 
     async def invalidate(self, batch_id: int) -> None:
         try:
-            await self.client.set(self._generation_key(batch_id), uuid4().hex)
+            await self.client.set(
+                self._generation_key(batch_id), uuid4().hex, ex=self.ttl_seconds * 2
+            )
         except RedisError:
             logger.warning(
                 "Failed to invalidate cached statistics for Batch %s",

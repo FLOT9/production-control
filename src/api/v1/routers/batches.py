@@ -8,13 +8,11 @@ from fastapi import (
     Depends,
     File,
     HTTPException,
-    Path,
     Query,
     UploadFile,
     status,
 )
 from fastapi.responses import RedirectResponse
-from pydantic import Field
 from starlette.concurrency import run_in_threadpool
 
 from src.api.dependencies.analytics import BatchAnalyticsServiceDep
@@ -36,6 +34,7 @@ from src.api.v1.schemas import (
 from src.api.v1.schemas.analytics import BatchAnalyticsRead
 from src.api.v1.schemas.batch_report import BatchReportRequest
 from src.api.v1.schemas.batch_transfer import BatchExportRequest
+from src.api.v1.schemas.common import PositiveInt32, PositiveInt32Path
 from src.application.dto import BatchIntegrationData
 from src.application.dto.report_format import ReportFormat
 from src.application.services.product_service import (
@@ -65,7 +64,7 @@ ProductServiceDep = Annotated[ProductService, Depends(get_product_service)]
     "/{batch_id}/reports", response_model=ReportGenerationTaskRead, status_code=202
 )
 async def create_batch_report(
-    batch_id: Annotated[int, Field(gt=0, le=2**31 - 1)],
+    batch_id: PositiveInt32Path,
     payload: BatchReportRequest,
     service: BatchServiceDep,
 ) -> ReportGenerationTaskRead:
@@ -81,7 +80,7 @@ async def create_batch_report(
 
 @router.get("/{batch_id}/reports/{report_id}/download")
 async def download_batch_report(
-    batch_id: Annotated[int, Field(gt=0, le=2**31 - 1)],
+    batch_id: PositiveInt32Path,
     report_id: UUID,
     service: Annotated[ReportDownloadService, Depends(get_report_download_service)],
     format: ReportFormat = "excel",
@@ -92,7 +91,7 @@ async def download_batch_report(
 
 @router.post("/{batch_id}/aggregate", response_model=dict[str, object])
 async def aggregate_batch_products(
-    batch_id: int,
+    batch_id: PositiveInt32Path,
     payload: ProductAggregationRequest,
     service: ProductServiceDep,
 ) -> ProductAggregationResult:
@@ -108,7 +107,7 @@ async def aggregate_batch_products(
     status_code=status.HTTP_202_ACCEPTED,
 )
 async def aggregate_batch_products_async(
-    batch_id: int,
+    batch_id: PositiveInt32Path,
     payload: ProductAggregationRequest,
 ) -> ProductAggregationTaskRead:
     task = await run_in_threadpool(
@@ -232,9 +231,7 @@ async def download_batch_export(
     response_model=BatchComparisonRead,
 )
 async def compare_batches(
-    batch_ids: Annotated[
-        list[Annotated[int, Field(gt=0)]], Query(min_length=2, max_length=10)
-    ],
+    batch_ids: Annotated[list[PositiveInt32], Query(min_length=2, max_length=10)],
     service: BatchServiceDep,
 ) -> BatchComparisonRead:
     statistics = await service.compare_batches(batch_ids)
@@ -245,7 +242,7 @@ async def compare_batches(
 
 @router.get("/{batch_id}/statistics", response_model=BatchAnalyticsRead)
 async def get_batch_statistics(
-    batch_id: Annotated[int, Path(gt=0, le=2**31 - 1)],
+    batch_id: PositiveInt32Path,
     service: BatchAnalyticsServiceDep,
 ) -> BatchAnalyticsRead:
     return BatchAnalyticsRead.model_validate(await service.get_statistics(batch_id))
@@ -256,7 +253,7 @@ async def get_batch_statistics(
     response_model=BatchDetailsRead,
 )
 async def get_batch(
-    batch_id: int,
+    batch_id: PositiveInt32Path,
     service: BatchServiceDep,
 ) -> BatchDetailsRead:
     batch = await service.get_by_id(batch_id)
@@ -268,7 +265,7 @@ async def get_batch(
     response_model=BatchRead,
 )
 async def update_batch(
-    batch_id: int,
+    batch_id: PositiveInt32Path,
     payload: BatchUpdate,
     service: BatchServiceDep,
 ) -> BatchRead:
@@ -284,7 +281,7 @@ async def update_batch(
     status_code=status.HTTP_204_NO_CONTENT,
 )
 async def delete_batch(
-    batch_id: int,
+    batch_id: PositiveInt32Path,
     service: BatchServiceDep,
 ) -> None:
     await service.delete(batch_id)

@@ -9,6 +9,7 @@ from redis.asyncio import Redis
 from redis.exceptions import RedisError
 
 from src.application.dto.dashboard import DashboardSummary
+from src.storage.cache_generation import read_generation
 
 logger = logging.getLogger(__name__)
 summary_adapter = TypeAdapter(DashboardSummary)
@@ -33,10 +34,9 @@ class DashboardCache:
         # Capture the generation BEFORE reading SQL. Late writes after
         # invalidation remain in the old generation and cannot refill the new one.
         try:
-            version = await self.client.get(f"{self.prefix}:version")
-            if version is None:
-                await self.client.set(f"{self.prefix}:version", uuid4().hex, nx=True)
-                version = await self.client.get(f"{self.prefix}:version")
+            version = await read_generation(
+                self.client, f"{self.prefix}:version", self.ttl_seconds
+            )
             if version is None:
                 if strict:
                     raise RedisError("Dashboard cache version is unavailable")
@@ -80,6 +80,8 @@ class DashboardCache:
 
     async def invalidate(self) -> None:
         try:
-            await self.client.set(f"{self.prefix}:version", uuid4().hex)
+            await self.client.set(
+                f"{self.prefix}:version", uuid4().hex, ex=self.ttl_seconds * 2
+            )
         except RedisError:
             logger.warning("Cannot invalidate Dashboard cache", exc_info=True)

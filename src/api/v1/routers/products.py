@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends
 from starlette import status
 from starlette.concurrency import run_in_threadpool
 
@@ -11,6 +11,7 @@ from src.api.v1.schemas import (
     ProductCreate,
     ProductRead,
 )
+from src.api.v1.schemas.common import PositiveInt32Query
 from src.application.services.product_service import ProductService
 from src.core.dependencies import get_product_service
 from src.tasks.product_tasks import (
@@ -49,7 +50,7 @@ async def create_product(
 async def aggregate_product(
     service: ProductServiceDep,
     unique_code: str,
-    batch_id: Annotated[int, Query(gt=0, le=2**31 - 1)],
+    batch_id: PositiveInt32Query,
 ) -> ProductRead:
     product = await service.aggregate(unique_code=unique_code, batch_id=batch_id)
     return ProductRead.model_validate(product)
@@ -62,7 +63,7 @@ async def aggregate_product(
 )
 async def aggregate_products_bulk(
     payload: ProductAggregationRequest,
-    batch_id: Annotated[int, Query(gt=0, le=2**31 - 1)],
+    batch_id: PositiveInt32Query,
 ) -> ProductAggregationTaskRead:
     task = await run_in_threadpool(
         aggregate_products_task.delay,

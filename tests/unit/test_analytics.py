@@ -296,7 +296,9 @@ class ServiceTests(IsolatedAsyncioTestCase):
                 values[key] = value
 
         client = SimpleNamespace(
-            get=AsyncMock(side_effect=get), set=AsyncMock(side_effect=put)
+            get=AsyncMock(side_effect=get),
+            set=AsyncMock(side_effect=put),
+            expire=AsyncMock(return_value=True),
         )
         cache = AnalyticsCache(client, DashboardAnalytics, 300)
         params = {

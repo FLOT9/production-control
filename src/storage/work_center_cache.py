@@ -6,6 +6,8 @@ from pydantic import BaseModel, ValidationError
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
 
+from src.storage.cache_generation import read_generation
+
 logger = logging.getLogger(__name__)
 
 
@@ -30,13 +32,12 @@ class WorkCenterCache:
     def _generation_key(work_center_id: int) -> str:
         return f"work-center:v2:{work_center_id}:generation"
 
-    async def make_key(self, work_center_id: int) -> str | None:
+    async def make_key(self, work_center_id: int, *, create: bool = True) -> str | None:
         generation_key = self._generation_key(work_center_id)
         try:
-            generation = await self.client.get(generation_key)
-            if generation is None:
-                await self.client.set(generation_key, uuid4().hex, nx=True)
-                generation = await self.client.get(generation_key)
+            generation = await read_generation(
+                self.client, generation_key, self.ttl_seconds, create=create
+            )
             if generation is None:
                 return None
             return f"work-center:v2:{work_center_id}:data:{generation}"
@@ -104,7 +105,11 @@ class WorkCenterCache:
 
     async def invalidate(self, work_center_id: int) -> None:
         try:
-            await self.client.set(self._generation_key(work_center_id), uuid4().hex)
+            await self.client.set(
+                self._generation_key(work_center_id),
+                uuid4().hex,
+                ex=self.ttl_seconds * 2,
+            )
         except RedisError:
             logger.warning(
                 "Failed to invalidate cache for deleted WorkCenter %s",

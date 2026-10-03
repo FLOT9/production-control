@@ -37,9 +37,11 @@ class BatchProductsTests(IsolatedAsyncioTestCase):
         )
         first = BatchDetailsRead.model_validate(await service.get_by_id(42))
         cached = BatchDetailsRead.model_validate(await service.get_by_id(42))
+        third = BatchDetailsRead.model_validate(await service.get_by_id(42))
+        self.assertEqual(third, cached)
         self.assertEqual(first, cached)
         self.assertEqual(cached.products[0].unique_code, "P-001")
-        repo.get_with_products.assert_awaited_once_with(42)
+        self.assertEqual(repo.get_with_products.await_count, 2)
         self.assertNotIn("products", BatchRead.model_validate(row).model_dump())
 
     async def test_empty_products_and_missing_batch(self):

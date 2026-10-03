@@ -16,8 +16,10 @@ class BatchExportFileError(Exception):
 
 
 class ProductionSummaryEmptyError(Exception):
-    def __init__(self) -> None:
-        super().__init__("No production data available for report")
+    def __init__(
+        self, message: str = "No production data available for report"
+    ) -> None:
+        super().__init__(message)
 
 
 class ReportNotFoundError(Exception):

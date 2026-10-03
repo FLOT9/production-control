@@ -19,6 +19,9 @@ class FakeRedis:
     async def get(self, key: str) -> str | None:
         return self.values.get(key)
 
+    async def expire(self, key: str, seconds: int, *, nx: bool = False) -> bool:
+        return key in self.values
+
     async def set(
         self, key: str, value: str, *, nx: bool = False, ex: int | None = None
     ) -> bool:
@@ -78,6 +81,7 @@ class OtherCacheGenerationTests(unittest.IsolatedAsyncioTestCase):
             uow=SimpleNamespace(work_centers=SimpleNamespace(get_by_id=get_by_id)),
             cache=cache,
         )
+        await cache.make_key(1)
         old_read = asyncio.create_task(service.get_by_id(1))
         await started.wait()
         old_key = await cache.make_key(1)
@@ -119,6 +123,7 @@ class OtherCacheGenerationTests(unittest.IsolatedAsyncioTestCase):
             details_cache=None,
             webhook_event_service=None,
         )
+        await cache.make_keys([1, 2])
         old_read = asyncio.create_task(service.compare_batches([1, 2]))
         await started.wait()
         old_key = await cache.make_key(1)

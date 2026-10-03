@@ -18,7 +18,7 @@ class BatchAnalyticsService:
         self, batch_id: int, *, now: datetime | None = None
     ) -> BatchAnalytics:
         now = now or datetime.now(UTC)
-        key = await self.cache.batch_key(batch_id)
+        key = await self.cache.batch_key(batch_id, create=False)
         snapshot = await self.cache.get(key)
         if snapshot is not None and snapshot.batch_info.id != batch_id:
             snapshot = None
@@ -27,6 +27,8 @@ class BatchAnalyticsService:
             if not rows:
                 raise BatchNotFoundError(batch_id)
             snapshot = rows[0]
+            if key is None:
+                await self.cache.batch_key(batch_id)
             stored = snapshot.model_copy(update={"cached_at": datetime.now(UTC)})
             if await self.cache.set(key, stored):
                 snapshot = stored

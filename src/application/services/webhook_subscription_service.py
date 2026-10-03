@@ -2,6 +2,7 @@ from src.application.events import WebhookEventType
 from src.application.exceptions import WebhookSubscriptionNotFoundError
 from src.data.models import WebhookSubscription
 from src.data.unit_of_work import UnitOfWork
+from src.integrations.webhooks.url_policy import resolve_target
 
 UPDATABLE_WEBHOOK_FIELDS = (
     "url",
@@ -26,6 +27,7 @@ class WebhookSubscriptionService:
         retry_count: int,
         timeout_seconds: int,
     ) -> WebhookSubscription:
+        await resolve_target(url)
         subscription = await self.uow.webhook_subscriptions.create(
             url=url,
             events=[event.value for event in events],
@@ -55,6 +57,8 @@ class WebhookSubscriptionService:
         subscription_id: int,
         changes: dict[str, object],
     ) -> WebhookSubscription:
+        if "url" in changes:
+            await resolve_target(str(changes["url"]))
         subscription = await self.get_by_id(subscription_id)
 
         if not changes:

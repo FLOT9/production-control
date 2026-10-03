@@ -72,7 +72,13 @@ def main() -> None:
                 retention_days("MINIO_REPORT_RETENTION_DAYS", 30),
             ),
         ],
-        "exports": [],
+        "exports": [
+            expiration_rule(
+                "production-control-exports",
+                "batch-exports/",
+                retention_days("MINIO_EXPORT_RETENTION_DAYS", 7),
+            ),
+        ],
     }
 
     client = Minio(

@@ -3,6 +3,7 @@ from typing import Annotated
 
 from fastapi import Depends, HTTPException, Query
 
+from src.api.v1.schemas.common import OptionalPositiveInt32Query
 from src.application.dto import BatchFilters
 from src.application.services.batch_service import BatchService
 from src.core.batch_service_factory import build_batch_service
@@ -13,9 +14,9 @@ from src.storage.redis import redis_client
 
 def get_batch_filters(
     is_closed: bool | None = None,
-    batch_number: int | None = Query(None, gt=0),
+    batch_number: OptionalPositiveInt32Query = None,
     batch_date: date | None = None,
-    work_center_id: int | None = Query(None, gt=0),
+    work_center_id: OptionalPositiveInt32Query = None,
     shift: str | None = Query(None, min_length=1, max_length=50),
     date_from: date | None = None,
     date_to: date | None = None,

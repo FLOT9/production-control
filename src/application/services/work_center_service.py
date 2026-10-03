@@ -38,7 +38,7 @@ class WorkCenterService:
         self,
         work_center_id: int,
     ) -> dict[str, object]:
-        key = await self.cache.make_key(work_center_id)
+        key = await self.cache.make_key(work_center_id, create=False)
         cached = await self.cache.get(key, work_center_id)
 
         if cached is not None:
@@ -54,6 +54,8 @@ class WorkCenterService:
             "updated_at": work_center.updated_at.isoformat(),
         }
 
+        if key is None:
+            await self.cache.make_key(work_center_id)
         await self.cache.set(key, work_center_id, data)
         return data
 

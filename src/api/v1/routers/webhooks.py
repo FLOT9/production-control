@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Path, Query, status
+from fastapi import APIRouter, Query, status
 
 from src.api.dependencies.webhooks import (
     WebhookDeliveryHistoryServiceDep,
@@ -11,6 +11,7 @@ from src.api.v1.schemas import (
     WebhookSubscriptionRead,
     WebhookSubscriptionUpdate,
 )
+from src.api.v1.schemas.common import PositiveInt32Path
 from src.api.v1.schemas.webhook import WebhookSubscriptionPage
 from src.api.v1.schemas.webhook_delivery import (
     WebhookDeliveryListItem,
@@ -61,7 +62,7 @@ async def list_webhook_subscriptions(
     response_model=WebhookSubscriptionRead,
 )
 async def get_webhook_subscription(
-    subscription_id: int,
+    subscription_id: PositiveInt32Path,
     service: WebhookSubscriptionServiceDep,
 ) -> WebhookSubscriptionRead:
     subscription = await service.get_by_id(subscription_id)
@@ -73,13 +74,13 @@ async def get_webhook_subscription(
     response_model=WebhookSubscriptionRead,
 )
 async def update_webhook_subscription(
-    subscription_id: int,
+    subscription_id: PositiveInt32Path,
     payload: WebhookSubscriptionUpdate,
     service: WebhookSubscriptionServiceDep,
 ) -> WebhookSubscriptionRead:
     subscription = await service.update(
         subscription_id,
-        payload.model_dump(exclude_unset=True, mode="json"),
+        payload.model_dump(exclude_unset=True, mode="json", by_alias=False),
     )
     return WebhookSubscriptionRead.model_validate(subscription)
 
@@ -89,7 +90,7 @@ async def update_webhook_subscription(
     status_code=status.HTTP_204_NO_CONTENT,
 )
 async def deactivate_webhook_subscription(
-    subscription_id: int,
+    subscription_id: PositiveInt32Path,
     service: WebhookSubscriptionServiceDep,
 ) -> None:
     await service.deactivate(subscription_id)
@@ -144,7 +145,7 @@ async def list_webhooks(
 
 @router.get("/{subscription_id}/deliveries", response_model=WebhookDeliveryPage)
 async def list_subscription_deliveries(
-    subscription_id: Annotated[int, Path(gt=0)],
+    subscription_id: PositiveInt32Path,
     service: WebhookDeliveryHistoryServiceDep,
     offset: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
