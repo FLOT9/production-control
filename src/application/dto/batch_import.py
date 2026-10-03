@@ -1,0 +1,79 @@
+from dataclasses import dataclass
+from datetime import UTC, date, datetime
+from typing import Self
+from zoneinfo import ZoneInfo
+
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
+
+from src.core.config import settings
+
+
+class BatchImportRow(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    task_description: str = Field(min_length=1)
+    work_center_id: int = Field(gt=0, le=2**31 - 1)
+    shift: str = Field(min_length=1, max_length=50)
+    team: str = Field(min_length=1, max_length=255)
+    batch_number: int = Field(gt=0, le=2**31 - 1)
+    batch_date: date
+    nomenclature: str = Field(min_length=1, max_length=255)
+    ekn_code: str = Field(min_length=1, max_length=100)
+    shift_start: AwareDatetime
+    shift_end: AwareDatetime
+    is_closed: bool = False
+
+    @field_validator("shift_start", "shift_end", mode="before")
+    @classmethod
+    def normalize_datetime(cls, value: object) -> object:
+        if isinstance(value, str):
+            value = datetime.fromisoformat(value)
+        if isinstance(value, datetime):
+            if value.tzinfo is None:
+                value = value.replace(tzinfo=ZoneInfo(settings.production_timezone))
+            return value.astimezone(UTC)
+        return value
+
+    @model_validator(mode="after")
+    def validate_shift_period(self) -> Self:
+        if self.shift_end <= self.shift_start:
+            raise ValueError("shift_end must be later than shift_start")
+
+        return self
+
+
+@dataclass(frozen=True, slots=True)
+class BatchImportRowError:
+    row_number: int
+    reason: str
+
+
+@dataclass(frozen=True, slots=True)
+class ParsedBatchImportRow:
+    row_number: int
+    data: BatchImportRow
+
+
+@dataclass(frozen=True, slots=True)
+class BatchCsvParseResult:
+    valid_rows: list[ParsedBatchImportRow]
+    errors: list[BatchImportRowError]
+
+
+@dataclass(frozen=True, slots=True)
+class BatchImportProcessedRow:
+    row_number: int
+    batch_id: int
+
+
+@dataclass(frozen=True, slots=True)
+class BatchImportResult:
+    processed: list[BatchImportProcessedRow]
+    failed: list[BatchImportRowError]

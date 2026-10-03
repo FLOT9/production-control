@@ -1,4 +1,88 @@
+x-app: &app
+  build:
+    context: .
+    dockerfile: docker/app.Dockerfile
+  image: production-control:local
+  env_file: .env
+  environment:
+    DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/production_control
+    CELERY_BROKER_URL: amqp://production_control:production_control@rabbitmq:5672//
+    CELERY_RESULT_BACKEND: redis://redis:6379/0
+    REDIS_CACHE_URL: redis://redis:6379/1
+    MINIO_ENDPOINT: minio:9000
+    MINIO_PUBLIC_ENDPOINT: localhost:9000
+    MINIO_ROOT_USER: ${MINIO_ROOT_USER:-production_control}
+    MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-local-minio-password}
+    SMTP_HOST: ${SMTP_HOST:-mailpit}
+    SMTP_PORT: ${SMTP_PORT:-1025}
+
+x-app-depends-on: &app-depends-on
+  migrate:
+    condition: service_completed_successfully
+  rabbitmq:
+    condition: service_healthy
+  redis:
+    condition: service_healthy
+  minio-init:
+    condition: service_completed_successfully
+
 services:
+  mailpit:
+    image: axllent/mailpit:latest
+    ports:
+      - "127.0.0.1:8025:8025"
+      - "127.0.0.1:1025:1025"
+
+  migrate:
+    <<: *app
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    <<: *app
+    command: ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on: *app-depends-on
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  worker:
+    <<: *app
+    command: ["celery", "-A", "src.tasks.celery_app:celery_app", "worker", "--loglevel=info", "--pool=solo"]
+    depends_on: *app-depends-on
+    restart: unless-stopped
+
+  beat:
+    <<: *app
+    command: ["celery", "-A", "src.tasks.celery_app:celery_app", "beat", "--loglevel=info"]
+    depends_on: *app-depends-on
+    restart: unless-stopped
+
+  flower:
+    image: mher/flower:2.1.0
+    command: ["celery", "--config=flowerconfig", "flower"]
+    environment:
+      CELERY_BROKER_URL: amqp://production_control:production_control@rabbitmq:5672//
+      FLOWER_BASIC_AUTH: ${FLOWER_BASIC_AUTH:-admin:local-flower-password}
+      PYTHONPATH: /etc/flower
+      TZ: Asia/Yekaterinburg
+    ports:
+      - "127.0.0.1:5555:5555"
+    volumes:
+      - ./flowerconfig.py:/etc/flower/flowerconfig.py:ro
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+
   postgres:
     image: postgres:16-alpine
     environment:
@@ -15,5 +99,69 @@ services:
       timeout: 5s
       retries: 5
 
+  rabbitmq:
+    image: rabbitmq:4-management
+    environment:
+      RABBITMQ_DEFAULT_USER: production_control
+      RABBITMQ_DEFAULT_PASS: production_control
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  minio:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-production_control}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-local-minio-password}
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  minio-init:
+    build:
+      context: .
+      dockerfile: docker/minio-init.Dockerfile
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-production_control}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-local-minio-password}
+      MINIO_IMPORT_RETENTION_DAYS: ${MINIO_IMPORT_RETENTION_DAYS:-7}
+      MINIO_EXPORT_RETENTION_DAYS: ${MINIO_EXPORT_RETENTION_DAYS:-7}
+      MINIO_REPORT_RETENTION_DAYS: ${MINIO_REPORT_RETENTION_DAYS:-30}
+    restart: "no"
+
 volumes:
   postgres_data:
+  rabbitmq_data:
+  redis_data:
+  minio_data:
