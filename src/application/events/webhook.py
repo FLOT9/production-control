@@ -12,6 +12,8 @@ class WebhookEventType(StrEnum):
     BATCH_REOPENED = "batch_reopened"
     PRODUCT_CREATED = "product_created"
     PRODUCT_AGGREGATED = "product_aggregated"
+    REPORT_GENERATED = "report_generated"
+    IMPORT_COMPLETED = "import_completed"
 
 
 @dataclass(frozen=True, slots=True)

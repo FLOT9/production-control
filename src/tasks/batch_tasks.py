@@ -4,15 +4,18 @@ from dataclasses import asdict
 from datetime import UTC, date, datetime
 from typing import Literal
 
+from celery import Task
 from sqlalchemy.exc import OperationalError
 
 from src.application.dto import BatchFilters
+from src.application.events import WebhookEvent, WebhookEventType
 from src.application.exceptions import BatchCsvFileError, BatchCsvHeadersError
 from src.application.importers import BatchCsvParser
 from src.application.importers.batch_excel import BatchExcelParser
 from src.application.reports.batch_csv import BatchCsvExporter
 from src.application.services.batch_export_service import BatchExportService
 from src.application.services.batch_import_service import BatchImportService
+from src.application.services.webhook_event_service import WebhookEventService
 from src.core.batch_service_factory import build_batch_service
 from src.core.config import settings
 from src.core.database import async_session_maker, dispose_engine
@@ -95,11 +98,13 @@ def export_batches_csv(
     return asyncio.run(_export_batches_csv(filters))
 
 
-async def _import_batches_csv(object_name: str) -> dict:
-    return await _import_batches(object_name, "csv")
+async def _import_batches_csv(object_name: str, task_id: str | None = None) -> dict:
+    return await _import_batches(object_name, "csv", task_id)
 
 
-async def _import_batches(object_name: str, format: Literal["csv", "excel"]) -> dict:
+async def _import_batches(
+    object_name: str, format: Literal["csv", "excel"], task_id: str | None = None
+) -> dict:
     if format not in ("csv", "excel"):
         raise BatchCsvFileError("Unsupported import format")
     client = create_redis_client()
@@ -120,6 +125,21 @@ async def _import_batches(object_name: str, format: Literal["csv", "excel"]) -> 
                 raise BatchCsvFileError("CSV must be UTF-8 encoded") from error
             except csv.Error as error:
                 raise BatchCsvFileError("Invalid CSV file") from error
+            await WebhookEventService(uow).create_deliveries(
+                WebhookEvent(
+                    WebhookEventType.IMPORT_COMPLETED,
+                    {
+                        "task_id": task_id,
+                        "format": format,
+                        "total": len(result.processed) + len(result.failed),
+                        "imported": len(result.processed),
+                        "failed": len(result.failed),
+                        "batch_ids": [row.batch_id for row in result.processed],
+                        "errors": [asdict(row) for row in result.failed],
+                    },
+                )
+            )
+            await uow.commit()
             return asdict(result)
     finally:
         try:
@@ -128,14 +148,16 @@ async def _import_batches(object_name: str, format: Literal["csv", "excel"]) -> 
             await dispose_engine()
 
 
-@celery_app.task(name="batches.import_csv")
-def import_batches_csv(object_name: str) -> dict:
-    return asyncio.run(_import_batches_csv(object_name))
+@celery_app.task(bind=True, name="batches.import_csv")
+def import_batches_csv(self: Task, object_name: str) -> dict:
+    return asyncio.run(_import_batches_csv(object_name, self.request.id))
 
 
-@celery_app.task(name="batches.import_file")
-def import_batches_file(object_name: str, format: Literal["csv", "excel"]) -> dict:
-    return asyncio.run(_import_batches(object_name, format))
+@celery_app.task(bind=True, name="batches.import_file")
+def import_batches_file(
+    self: Task, object_name: str, format: Literal["csv", "excel"]
+) -> dict:
+    return asyncio.run(_import_batches(object_name, format, self.request.id))
 
 
 @celery_app.task(name="batches.export_file")

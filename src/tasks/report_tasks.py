@@ -1,10 +1,12 @@
 import asyncio
 import logging
 
+from celery import Task
 from kombu.exceptions import KombuError
 
 from src.application.dto.report_format import ReportFormat
 from src.application.dto.stored_report import StoredReport
+from src.application.events import WebhookEvent, WebhookEventType
 from src.application.reports.production_summary_excel import (
     ProductionSummaryExcelGenerator,
 )
@@ -14,6 +16,7 @@ from src.application.services.email_service import batch_report_download_url
 from src.application.services.production_summary_service import (
     ProductionSummaryService,
 )
+from src.application.services.webhook_event_service import WebhookEventService
 from src.core.config import settings
 from src.core.database import async_session_maker, dispose_engine
 from src.data.unit_of_work import UnitOfWork
@@ -24,7 +27,7 @@ from src.tasks.email_tasks import send_report_notification
 logger = logging.getLogger(__name__)
 
 
-async def _generate_production_summary() -> dict[str, str]:
+async def _generate_production_summary(task_id: str | None = None) -> dict[str, str]:
     try:
         async with async_session_maker() as session:
             uow = UnitOfWork(session)
@@ -38,6 +41,19 @@ async def _generate_production_summary() -> dict[str, str]:
             )
 
             report = await service.generate_and_upload()
+            await WebhookEventService(uow).create_deliveries(
+                WebhookEvent(
+                    WebhookEventType.REPORT_GENERATED,
+                    {
+                        "task_id": task_id,
+                        "report_id": str(report.report_id),
+                        "report_type": "production_summary",
+                        "format": "excel",
+                        "download_url": f"{str(settings.public_api_url).rstrip('/')}/api/v1/reports/{report.report_id}/download",
+                    },
+                )
+            )
+            await uow.commit()
 
             return {
                 "report_id": str(report.report_id),
@@ -48,29 +64,52 @@ async def _generate_production_summary() -> dict[str, str]:
         await dispose_engine()
 
 
-@celery_app.task(name="reports.generate_production_summary")
-def generate_production_summary() -> dict[str, str]:
-    return asyncio.run(_generate_production_summary())
+@celery_app.task(bind=True, name="reports.generate_production_summary")
+def generate_production_summary(self: Task) -> dict[str, str]:
+    return asyncio.run(_generate_production_summary(self.request.id))
 
 
-async def _generate_batch_report(batch_id: int, format: ReportFormat) -> StoredReport:
+async def _generate_batch_report(
+    batch_id: int, format: ReportFormat, task_id: str | None = None
+) -> StoredReport:
     try:
         async with async_session_maker() as session:
+            uow = UnitOfWork(session)
             service = BatchReportFileService(
-                BatchReportService(UnitOfWork(session)),
+                BatchReportService(uow),
                 create_object_storage(),
                 settings.production_timezone,
             )
-            return await service.generate_and_upload(batch_id, format)
+            report = await service.generate_and_upload(batch_id, format)
+            await WebhookEventService(uow).create_deliveries(
+                WebhookEvent(
+                    WebhookEventType.REPORT_GENERATED,
+                    {
+                        "task_id": task_id,
+                        "report_id": str(report.report_id),
+                        "report_type": "batch",
+                        "batch_id": batch_id,
+                        "format": format,
+                        "download_url": batch_report_download_url(
+                            str(settings.public_api_url),
+                            batch_id,
+                            report.report_id,
+                            format,
+                        ),
+                    },
+                )
+            )
+            await uow.commit()
+            return report
     finally:
         await dispose_engine()
 
 
-@celery_app.task(name="reports.generate_batch")
+@celery_app.task(bind=True, name="reports.generate_batch")
 def generate_batch_report(
-    batch_id: int, format: ReportFormat = "excel", email: str | None = None
+    self: Task, batch_id: int, format: ReportFormat = "excel", email: str | None = None
 ) -> dict[str, object]:
-    report = asyncio.run(_generate_batch_report(batch_id, format))
+    report = asyncio.run(_generate_batch_report(batch_id, format, self.request.id))
     result: dict[str, object] = {
         "report_id": str(report.report_id),
         "batch_id": batch_id,
