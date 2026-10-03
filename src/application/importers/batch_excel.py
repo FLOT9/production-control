@@ -1,4 +1,7 @@
 from io import BytesIO
+
+# Only the exception type is imported; openpyxl handles XML parsing.
+from xml.etree.ElementTree import ParseError  # nosec B405
 from zipfile import BadZipFile, ZipFile
 
 from openpyxl import load_workbook
@@ -87,5 +90,6 @@ class BatchExcelParser:
             KeyError,
             ValueError,
             IndexError,
+            ParseError,
         ) as error:
             raise BatchCsvFileError("Invalid or damaged Excel file") from error

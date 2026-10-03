@@ -11,6 +11,10 @@ class BatchCsvFileError(Exception):
     """A file-level CSV error safe to return to the import client."""
 
 
+class BatchExportFileError(Exception):
+    """An expected export limitation safe to return to the client."""
+
+
 class ProductionSummaryEmptyError(Exception):
     def __init__(self) -> None:
         super().__init__("No production data available for report")
