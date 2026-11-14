@@ -37,6 +37,10 @@ class Settings(BaseSettings):
     smtp_password: SecretStr | None = None
     smtp_from_email: str = "reports@production-control.local"
     smtp_timeout_seconds: int = Field(default=10, gt=0, le=60)
+    gigachat_auth_key: SecretStr | None = None
+    gigachat_model: str = "GigaChat-2"
+    gigachat_timeout_seconds: int = Field(default=10, gt=0, le=60)
+    gigachat_ca_bundle_file: str | None = None
 
     model_config = SettingsConfigDict(
         env_file=".env",
