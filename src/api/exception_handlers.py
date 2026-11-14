@@ -1,6 +1,14 @@
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 
+from src.application.ai.exceptions import (
+    AssistantDataUnavailableError,
+    AssistantNotConfiguredError,
+    AssistantTimeoutError,
+    InvalidModelResponseError,
+    InvalidToolResultError,
+    LLMUnavailableError,
+)
 from src.application.exceptions import (
     ObjectStorageUnavailableError,
     ReportNotFoundError,
@@ -29,6 +37,12 @@ from src.domain.exceptions.work_center import (
 from src.integrations.webhooks.url_policy import UnsafeWebhookUrlError
 
 ERROR_STATUS_CODES: dict[type[Exception], int] = {
+    AssistantNotConfiguredError: status.HTTP_503_SERVICE_UNAVAILABLE,
+    LLMUnavailableError: status.HTTP_503_SERVICE_UNAVAILABLE,
+    AssistantTimeoutError: status.HTTP_504_GATEWAY_TIMEOUT,
+    InvalidModelResponseError: status.HTTP_503_SERVICE_UNAVAILABLE,
+    InvalidToolResultError: status.HTTP_503_SERVICE_UNAVAILABLE,
+    AssistantDataUnavailableError: status.HTTP_503_SERVICE_UNAVAILABLE,
     UnsafeWebhookUrlError: status.HTTP_422_UNPROCESSABLE_CONTENT,
     WorkCenterAlreadyExistsError: status.HTTP_409_CONFLICT,
     WorkCenterNotFoundError: status.HTTP_404_NOT_FOUND,

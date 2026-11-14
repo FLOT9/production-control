@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from src.api.v1.routers.analytics import router as analytics_router
+from src.api.v1.routers.assistant import router as assistant_router
 from src.api.v1.routers.batches import router as batches_router
 from src.api.v1.routers.dashboard import router as dashboard_router
 from src.api.v1.routers.products import router as products_router
@@ -16,6 +17,7 @@ api_v1_router.include_router(work_centers_router)
 api_v1_router.include_router(batches_router)
 api_v1_router.include_router(dashboard_router)
 api_v1_router.include_router(analytics_router)
+api_v1_router.include_router(assistant_router)
 
 api_v1_router.include_router(products_router)
 api_v1_router.include_router(reports_router)
