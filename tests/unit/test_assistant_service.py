@@ -10,6 +10,7 @@ from src.application.ai.exceptions import (
     InvalidModelResponseError,
     InvalidToolResultError,
 )
+from src.application.ai.schemas import FindBatchesArgs
 from src.domain.exceptions.batch import BatchNotFoundError
 
 
@@ -28,7 +29,18 @@ class AssistantServiceTests(IsolatedAsyncioTestCase):
         self.bound_model.ainvoke = AsyncMock()
         model = Mock(spec=BaseChatModel)
         model.bind_tools.return_value = self.bound_model
-        self.assistant = AssistantService(self.bound_model, tool)
+        self.read_search = AsyncMock(return_value={"items": [], "total": 0})
+
+        async def find_batches(
+            batch_number: int, batch_date=None, limit: int = 5
+        ) -> dict:
+            """Find batches by number."""
+            return await self.read_search(batch_number, batch_date, limit)
+
+        search_tool = StructuredTool.from_function(
+            coroutine=find_batches, args_schema=FindBatchesArgs
+        )
+        self.assistant = AssistantService(self.bound_model, [tool, search_tool])
 
     def request(self, *, name="get_batch_statistics", batch_id=1):
         return AIMessage(
@@ -111,3 +123,104 @@ class AssistantServiceTests(IsolatedAsyncioTestCase):
                 }
                 with self.assertRaises(InvalidToolResultError):
                     await self.assistant.ask("ID 1?")
+
+    def search_request(self, **args):
+        return AIMessage(
+            content="Найдена несуществующая партия 999",
+            tool_calls=[
+                {
+                    "name": "find_batches",
+                    "args": {"batch_number": 41, **args},
+                    "id": "search-call",
+                    "type": "tool_call",
+                }
+            ],
+        )
+
+    def found(self, batch_id=101, batch_date="2026-11-10"):
+        return {
+            "id": batch_id,
+            "batch_number": 41,
+            "batch_date": batch_date,
+            "work_center_id": 7,
+            "is_closed": False,
+        }
+
+    async def test_find_single_batch_returns_search_data_without_reading_statistics(
+        self,
+    ):
+        self.bound_model.ainvoke.return_value = self.search_request()
+        self.read_search.return_value = {"items": [self.found()], "total": 1}
+        result = await self.assistant.ask("Найди партию №41")
+        self.assertEqual(result.status, "answered")
+        self.assertIn("ID 101", result.answer)
+        self.assertNotIn("999", result.answer)
+        self.assertIsNone(result.data)
+        self.assertEqual(result.search.total, 1)
+        self.assertEqual(result.tools_called, ["find_batches"])
+        self.read_search.assert_awaited_once_with(41, None, 5)
+        self.read_statistics.assert_not_awaited()
+        self.assertEqual(self.bound_model.ainvoke.await_count, 1)
+
+    async def test_find_missing_batch(self):
+        self.bound_model.ainvoke.return_value = self.search_request()
+        result = await self.assistant.ask("Найди партию №41")
+        self.assertEqual(result.status, "not_found")
+        self.assertEqual(result.search.items, [])
+        self.assertEqual(result.search.total, 0)
+
+    async def test_find_ambiguous_batch_uses_total_even_with_one_visible_item(self):
+        self.bound_model.ainvoke.return_value = self.search_request(limit=1)
+        self.read_search.return_value = {"items": [self.found()], "total": 12}
+        result = await self.assistant.ask("Найди партию №41")
+        self.assertEqual(result.status, "needs_clarification")
+        self.assertIn("12", result.answer)
+        self.assertIn("Уточните дату", result.answer)
+        self.assertIn("Показаны первые 1", result.answer)
+        self.assertIsNone(result.data)
+        self.read_statistics.assert_not_awaited()
+
+    async def test_find_valid_date_is_normalized_before_tool_execution(self):
+        from datetime import date
+
+        self.bound_model.ainvoke.return_value = self.search_request(
+            batch_date="2026-11-10"
+        )
+        self.read_search.return_value = {"items": [self.found()], "total": 1}
+        result = await self.assistant.ask("Найди №41 от 10 ноября 2026")
+        self.assertEqual(result.status, "answered")
+        self.read_search.assert_awaited_once_with(41, date(2026, 11, 10), 5)
+
+    async def test_invalid_search_arguments_do_not_call_search(self):
+        for args in (
+            {"batch_number": True},
+            {"batch_date": "wrong"},
+            {"limit": 11},
+            {"sql": "SELECT"},
+        ):
+            with self.subTest(args=args):
+                self.bound_model.ainvoke.return_value = self.search_request(**args)
+                with self.assertRaises(InvalidModelResponseError):
+                    await self.assistant.ask("Найди №41")
+        self.read_search.assert_not_awaited()
+
+    async def test_inconsistent_search_results_are_rejected(self):
+        for result in (
+            {"items": [self.found()], "total": 0},
+            {"items": [], "total": 1},
+            {"items": [self.found(), self.found()], "total": 2},
+            {"items": [{**self.found(), "batch_number": 42}], "total": 1},
+            {"items": [self.found(batch_date="2026-11-09")], "total": 1},
+        ):
+            with self.subTest(result=result):
+                self.bound_model.ainvoke.return_value = self.search_request(
+                    batch_date="2026-11-10"
+                )
+                self.read_search.return_value = result
+                with self.assertRaises(InvalidToolResultError):
+                    await self.assistant.ask("Найди №41 от 10 ноября 2026")
+
+    async def test_registry_rejects_duplicate_tool_names(self):
+        tools = list(self.assistant.tools.values())
+        with self.assertRaises(ValueError):
+            AssistantService(self.bound_model, [tools[0], tools[0]])

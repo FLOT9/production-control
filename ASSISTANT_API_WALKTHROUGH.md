@@ -8,40 +8,35 @@ HTTP → проверка клиентского ключа и схемы → As
 
 ## Локальный запуск
 
-Создайте случайный клиентский ключ:
+В корневом `.env` бэкенда включите `ASSISTANT_LOCAL_ENABLED=true`. В текущем рабочем окружении он уже включён. Ключ провайдера и сертификат по-прежнему использует только FastAPI.
 
 ```bash
-poetry run python -c 'import secrets; print(secrets.token_urlsafe(32))'
+docker compose up -d --wait postgres redis
+poetry run alembic upgrade head
+poetry run uvicorn src.main:app --reload --host 127.0.0.1 --no-proxy-headers
 ```
 
-Вставьте его в `.env`: `ASSISTANT_API_KEY=...`. Это отдельный ключ доступа к нашему API; ключ провайдера остаётся в `GIGACHAT_AUTH_KEY`.
+Откройте http://127.0.0.1:8000/#assistant. Отдельного фронтенд-сервера нет. FastAPI отдаёт только frontend/public; браузер отправляет обычный fetch на относительный /api/v1/assistant/ask без ключей. API-роутеры и /health зарегистрированы раньше статических файлов.
 
-При запущенных PostgreSQL и Redis:
+Безключевой режим разрешён только при явно включённом флаге, loopback-адресе клиента и локальном Host. По умолчанию флаг выключен, вне локального режима сохраняется X-API-Key. Это режим разработки, а не пользовательская авторизация для публичного размещения. --no-proxy-headers не позволяет прокси-заголовкам менять адрес клиента в таком локальном запуске.
 
-```bash
-poetry run uvicorn src.main:app --reload
-```
-
-Откройте http://127.0.0.1:8000/docs → Authorize → вставьте клиентский ключ → POST /api/v1/assistant/ask:
-
-```json
-{"question":"Сколько изделий осталось в партии с ID 1?"}
-```
-
-Новые настройки Settings:
+Настройки:
 
 ```python
+assistant_local_enabled: bool = False
 assistant_api_key: SecretStr | None = None
 assistant_timeout_seconds: int = Field(default=15, gt=0, le=60)
 ```
 
-Роутер зарегистрирован в `src/api/v1/routers/__init__.py`:
+Статические файлы подключаются в конце src/main.py:
 
 ```python
-api_v1_router.include_router(assistant_router)
+frontend_directory = Path(__file__).resolve().parent.parent / "frontend" / "public"
+if settings.assistant_local_enabled and frontend_directory.is_dir():
+    app.mount(
+        "/", StaticFiles(directory=frontend_directory, html=True), name="frontend"
+    )
 ```
-
-При запуске API в Docker путь GIGACHAT_CA_BUNDLE_FILE должен указывать на файл внутри контейнера; путь с Mac сам в контейнер не переносится. Для текущего этапа проще запускать API локально.
 
 ## Код по слоям
 
@@ -66,20 +61,23 @@ class AssistantAskResponse(AssistantResult):
 
 ### `src/api/dependencies/assistant.py`
 
-HTTP-ключ проверяется до сборки ассистента. Зависимость собирает модель, инструмент и сервис; управление SDK делегирует контексту интеграции.
+До сборки ассистента проверяется локальный доступ либо HTTP-ключ. Зависимость собирает модель, инструмент и сервис; управление SDK делегирует контексту интеграции.
 
 ```python
 import secrets
 from collections.abc import AsyncIterator
 from typing import Annotated
 
-from fastapi import Depends, HTTPException, Security
+from fastapi import Depends, HTTPException, Request, Security
 from fastapi.security import APIKeyHeader
 
 from src.application.ai.assistant_service import AssistantService
 from src.application.ai.exceptions import AssistantNotConfiguredError
-from src.application.ai.tools import create_statistics_tool
-from src.core.assistant_dependencies import batch_analytics_service
+from src.application.ai.tools import create_find_batches_tool, create_statistics_tool
+from src.core.assistant_dependencies import (
+    batch_analytics_service,
+    batch_search_service,
+)
 from src.core.config import settings
 from src.integrations.llm.adapter import LangChainModelAdapter
 from src.integrations.llm.factory import gigachat_model
@@ -88,8 +86,16 @@ api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 
 async def verify_assistant_key(
+    request: Request,
     api_key: Annotated[str | None, Security(api_key_header)],
 ) -> None:
+    if (
+        settings.assistant_local_enabled
+        and request.client is not None
+        and request.client.host in {"127.0.0.1", "::1"}
+        and request.url.hostname in {"127.0.0.1", "localhost", "::1"}
+    ):
+        return
     expected = settings.assistant_api_key
     if expected is None or not expected.get_secret_value():
         raise AssistantNotConfiguredError()
@@ -103,10 +109,13 @@ async def get_assistant_service(
     _authorized: Annotated[None, Depends(verify_assistant_key)],
 ) -> AsyncIterator[AssistantService]:
     async with gigachat_model(settings) as model:
-        tool = create_statistics_tool(batch_analytics_service)
+        tools = [
+            create_statistics_tool(batch_analytics_service),
+            create_find_batches_tool(batch_search_service),
+        ]
         yield AssistantService(
-            LangChainModelAdapter(model, tool),
-            tool,
+            LangChainModelAdapter(model, tools),
+            tools,
             timeout_seconds=settings.assistant_timeout_seconds,
         )
 
@@ -141,9 +150,35 @@ async def ask_assistant(
 DTO результата и проверка согласованности чисел.
 
 ```python
+from datetime import date
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+
+class FoundBatch(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int = Field(strict=True, gt=0, le=2**31 - 1)
+    batch_number: int = Field(strict=True, gt=0, le=2**31 - 1)
+    batch_date: date
+    work_center_id: int = Field(strict=True, gt=0, le=2**31 - 1)
+    is_closed: bool = Field(strict=True)
+
+
+class BatchSearchResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[FoundBatch] = Field(max_length=10)
+    total: int = Field(strict=True, ge=0)
+
+    @model_validator(mode="after")
+    def check_page(self) -> "BatchSearchResult":
+        if self.total < len(self.items) or (self.total > 0 and not self.items):
+            raise ValueError("Список партий не соответствует общему количеству")
+        if len({item.id for item in self.items}) != len(self.items):
+            raise ValueError("В списке повторяются ID партий")
+        return self
 
 
 class BatchStatisticsResult(BaseModel):
@@ -165,9 +200,10 @@ class AssistantData(BatchStatisticsResult):
 
 
 class AssistantResult(BaseModel):
-    status: Literal["answered", "not_found", "insufficient_data"]
+    status: Literal["answered", "not_found", "insufficient_data", "needs_clarification"]
     answer: str
     data: AssistantData | None = None
+    search: BatchSearchResult | None = None
     tools_called: list[str] = Field(default_factory=list)
 ```
 
@@ -194,7 +230,7 @@ import asyncio
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langchain_core.tools import BaseTool
-from pydantic import BaseModel, ValidationError
+from pydantic import ValidationError
 
 from src.application.ai.exceptions import (
     AssistantTimeoutError,
@@ -202,9 +238,11 @@ from src.application.ai.exceptions import (
     InvalidToolResultError,
 )
 from src.application.ai.ports import AssistantModel
+from src.application.ai.schemas import BatchStatisticsArgs, FindBatchesArgs
 from src.application.dto.assistant import (
     AssistantData,
     AssistantResult,
+    BatchSearchResult,
     BatchStatisticsResult,
 )
 from src.domain.exceptions.batch import BatchNotFoundError
@@ -214,11 +252,15 @@ class AssistantService:
     def __init__(
         self,
         model: AssistantModel,
-        statistics_tool: BaseTool,
+        tools: list[BaseTool],
         *,
         timeout_seconds: float = 15,
     ) -> None:
-        self.tool = statistics_tool
+        self.tools = {tool.name: tool for tool in tools}
+        if not self.tools or len(self.tools) != len(tools):
+            raise ValueError("Нужны инструменты с уникальными именами")
+        if self.tools.keys() - {"get_batch_statistics", "find_batches"}:
+            raise ValueError("Не поддерживается обработка результата инструмента")
         self.model = model
         self.timeout_seconds = timeout_seconds
 
@@ -234,9 +276,11 @@ class AssistantService:
             SystemMessage(
                 content=(
                     "Ты ассистент производства. "
-                    "Для получения показателей партии используй доступный инструмент. "
-                    "Аргумент batch_id — внутренний ID, а не номер партии. "
-                    "Если ID не указан, запроси уточнение. Не выдумывай показатели."
+                    "Для показателей по внутреннему ID вызывай get_batch_statistics. "
+                    "Для поиска по производственному номеру и дате вызывай find_batches. "
+                    "Номер партии не равен ID: не подставляй номер в batch_id. "
+                    "Если найдено несколько партий, необходимо уточнить дату. "
+                    "Каждый вопрос самостоятельный. Не выдумывай показатели."
                 )
             ),
             HumanMessage(content=question),
@@ -244,35 +288,47 @@ class AssistantService:
         response = await self.model.ainvoke(messages)
         if not isinstance(response, AIMessage):
             raise InvalidModelResponseError()
+        if response.invalid_tool_calls:
+            raise InvalidModelResponseError()
         if not response.tool_calls:
             return AssistantResult(
                 status="insufficient_data",
-                answer="Недостаточно данных. Укажите ID партии для получения статистики.",
+                answer="Недостаточно данных. Укажите ID партии или её номер и дату для поиска.",
             )
         if len(response.tool_calls) != 1:
             raise InvalidModelResponseError()
 
         tool_call = response.tool_calls[0]
-        if tool_call["name"] != self.tool.name:
+        selected_tool = self.tools.get(tool_call["name"])
+        if selected_tool is None:
             raise InvalidModelResponseError()
-        batch_id = tool_call["args"].get("batch_id")
-        if type(batch_id) is not int or not 0 < batch_id <= 2**31 - 1:
-            raise InvalidModelResponseError()
-        schema = self.tool.get_input_schema()
-        if not issubclass(schema, BaseModel):
-            raise TypeError("Инструмент должен использовать схему Pydantic v2")
+        schema = (
+            BatchStatisticsArgs
+            if selected_tool.name == "get_batch_statistics"
+            else FindBatchesArgs
+        )
         try:
-            schema.model_validate(tool_call["args"])
+            arguments = schema.model_validate(tool_call["args"]).model_dump()
         except ValidationError as error:
             raise InvalidModelResponseError() from error
+        if selected_tool.name == "get_batch_statistics":
+            batch_id = arguments["batch_id"]
+            if type(batch_id) is not int or not 0 < batch_id <= 2**31 - 1:
+                raise InvalidModelResponseError()
         try:
-            result = await self.tool.ainvoke(tool_call["args"])
+            result = await selected_tool.ainvoke(arguments)
         except BatchNotFoundError:
             return AssistantResult(
                 status="not_found",
                 answer="Партия не найдена.",
-                tools_called=[self.tool.name],
+                tools_called=[selected_tool.name],
             )
+        if selected_tool.name == "find_batches":
+            return self._search_result(result, arguments)
+        return self._statistics_result(result, batch_id)
+
+    @staticmethod
+    def _statistics_result(result: object, batch_id: int) -> AssistantResult:
         try:
             statistics = BatchStatisticsResult.model_validate(result)
         except ValidationError as error:
@@ -284,7 +340,43 @@ class AssistantService:
                 f"агрегировано {statistics.aggregated}, осталось {statistics.remaining}."
             ),
             data=AssistantData(batch_id=batch_id, **statistics.model_dump()),
-            tools_called=[self.tool.name],
+            tools_called=["get_batch_statistics"],
+        )
+
+    @staticmethod
+    def _search_result(result: object, arguments: dict[str, object]) -> AssistantResult:
+        try:
+            search = BatchSearchResult.model_validate(result)
+        except ValidationError as error:
+            raise InvalidToolResultError() from error
+        limit = arguments["limit"]
+        if not isinstance(limit, int) or len(search.items) > limit:
+            raise InvalidToolResultError()
+        for item in search.items:
+            if item.batch_number != arguments["batch_number"] or (
+                arguments.get("batch_date") is not None
+                and item.batch_date != arguments["batch_date"]
+            ):
+                raise InvalidToolResultError()
+        if search.total == 0:
+            return AssistantResult(
+                status="not_found",
+                answer="Партия не найдена.",
+                search=search,
+                tools_called=["find_batches"],
+            )
+        if search.total == 1:
+            item = search.items[0]
+            answer = f"Найдена партия №{item.batch_number} от {item.batch_date:%d.%m.%Y}, ID {item.id}."
+        else:
+            answer = f"Найдено партий: {search.total}. Уточните дату партии."
+            if search.total > len(search.items):
+                answer += f" Показаны первые {len(search.items)} совпадений."
+        return AssistantResult(
+            status="answered" if search.total == 1 else "needs_clarification",
+            answer=answer,
+            search=search,
+            tools_called=["find_batches"],
         )
 ```
 
@@ -295,16 +387,15 @@ class AssistantService:
 ```python
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
+from datetime import date
 
 from langchain_core.tools import BaseTool, tool
-from pydantic import BaseModel, ConfigDict, Field
 
+from src.application.ai.schemas import BatchStatisticsArgs, FindBatchesArgs
+from src.application.dto import BatchFilters
+from src.application.dto.assistant import FoundBatch
 from src.application.services.batch_analytics_service import BatchAnalyticsService
-
-
-class BatchStatisticsArgs(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    batch_id: int = Field(gt=0, le=2**31 - 1)
+from src.application.services.batch_service import BatchService
 
 
 def create_statistics_tool(
@@ -312,7 +403,7 @@ def create_statistics_tool(
 ) -> BaseTool:
     @tool(args_schema=BatchStatisticsArgs)
     async def get_batch_statistics(batch_id: int) -> dict[str, int]:
-        """Получить количество изделий и остаток партии по внутреннему ID."""
+        """Получить количество изделий и остаток партии по-внутреннему ID."""
         async with service_factory() as service:
             statistics = await service.get_statistics(batch_id)
         return {
@@ -322,6 +413,57 @@ def create_statistics_tool(
         }
 
     return get_batch_statistics
+
+
+async def find_batches(
+    service: BatchService,
+    batch_number: int,
+    batch_date: date | None = None,
+    limit: int = 5,
+) -> tuple[list[FoundBatch], int]:
+    filters = BatchFilters(
+        batch_number=batch_number,
+        batch_date=batch_date,
+    )
+
+    batches, total = await service.list_batches(filters=filters, limit=limit, offset=0)
+
+    items: list[FoundBatch] = []
+    for batch in batches:
+        item = FoundBatch.model_validate(batch)
+        items.append(item)
+
+    return items, total
+
+
+def create_find_batches_tool(
+    service_factory: Callable[[], AbstractAsyncContextManager[BatchService]],
+) -> BaseTool:
+    @tool("find_batches", args_schema=FindBatchesArgs)
+    async def search_batches(
+        batch_number: int,
+        batch_date: date | None = None,
+        limit: int = 5,
+    ) -> dict[str, object]:
+        """Найти партии по производственному номеру и необязательной дате.
+
+        Номер партии отличается от внутреннего ID. Если найдено несколько
+        партий, необходимо уточнить дату, а не выбирать первую.
+        """
+        async with service_factory() as service:
+            items, total = await find_batches(
+                service,
+                batch_number=batch_number,
+                batch_date=batch_date,
+                limit=limit,
+            )
+
+        return {
+            "items": [item.model_dump(mode="json") for item in items],
+            "total": total,
+        }
+
+    return search_batches
 ```
 
 ### `src/application/ai/exceptions.py`
@@ -381,8 +523,8 @@ from src.application.ai.exceptions import (
 class LangChainModelAdapter:
     """Translate provider failures into application exceptions."""
 
-    def __init__(self, model: BaseChatModel, tool: BaseTool) -> None:
-        self.model = model.bind_tools([tool])
+    def __init__(self, model: BaseChatModel, tools: list[BaseTool]) -> None:
+        self.model = model.bind_tools(tools)
 
     async def ainvoke(self, messages: list[BaseMessage]) -> BaseMessage:
         try:
@@ -472,6 +614,7 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+from redis.asyncio import Redis
 from redis.exceptions import RedisError
 from sqlalchemy.exc import DisconnectionError, InterfaceError, OperationalError
 from sqlalchemy.exc import TimeoutError as PoolTimeoutError
@@ -479,6 +622,8 @@ from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from src.application.ai.exceptions import AssistantDataUnavailableError
 from src.application.dto.analytics import BatchAnalyticsSnapshot
 from src.application.services.batch_analytics_service import BatchAnalyticsService
+from src.application.services.batch_service import BatchService
+from src.core.batch_service_factory import build_batch_service
 from src.core.config import settings
 from src.core.database import async_session_maker
 from src.data.unit_of_work import UnitOfWork
@@ -489,20 +634,13 @@ logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
-async def batch_analytics_service() -> AsyncIterator[BatchAnalyticsService]:
+async def _assistant_resources() -> AsyncIterator[tuple[UnitOfWork, Redis]]:
     """Keep database and Redis resources within one tool execution."""
     redis = create_redis_client()
     failed = True
     try:
         async with async_session_maker() as session:
-            yield BatchAnalyticsService(
-                UnitOfWork(session),
-                AnalyticsCache(
-                    redis,
-                    BatchAnalyticsSnapshot,
-                    settings.batch_statistics_cache_ttl_seconds,
-                ),
-            )
+            yield UnitOfWork(session), redis
         failed = False
     except (
         OperationalError,
@@ -522,6 +660,25 @@ async def batch_analytics_service() -> AsyncIterator[BatchAnalyticsService]:
             logger.warning(
                 "Cannot close analytics cache client after a failed operation"
             )
+
+
+@asynccontextmanager
+async def batch_analytics_service() -> AsyncIterator[BatchAnalyticsService]:
+    async with _assistant_resources() as (uow, redis):
+        yield BatchAnalyticsService(
+            uow,
+            AnalyticsCache(
+                redis,
+                BatchAnalyticsSnapshot,
+                settings.batch_statistics_cache_ttl_seconds,
+            ),
+        )
+
+
+@asynccontextmanager
+async def batch_search_service() -> AsyncIterator[BatchService]:
+    async with _assistant_resources() as (uow, redis):
+        yield build_batch_service(uow, redis)
 ```
 
 ### `src/api/exception_handlers.py`
@@ -618,8 +775,11 @@ def register_exception_handlers(app: FastAPI) -> None:
 import asyncio
 
 from src.application.ai.assistant_service import AssistantService
-from src.application.ai.tools import create_statistics_tool
-from src.core.assistant_dependencies import batch_analytics_service
+from src.application.ai.tools import create_find_batches_tool, create_statistics_tool
+from src.core.assistant_dependencies import (
+    batch_analytics_service,
+    batch_search_service,
+)
 from src.core.config import settings
 from src.core.database import dispose_engine
 from src.integrations.llm.adapter import LangChainModelAdapter
@@ -629,10 +789,13 @@ from src.integrations.llm.factory import gigachat_model
 async def main() -> None:
     try:
         async with gigachat_model(settings) as model:
-            tool = create_statistics_tool(batch_analytics_service)
+            tools = [
+                create_statistics_tool(batch_analytics_service),
+                create_find_batches_tool(batch_search_service),
+            ]
             assistant = AssistantService(
-                LangChainModelAdapter(model, tool),
-                tool,
+                LangChainModelAdapter(model, tools),
+                tools,
                 timeout_seconds=settings.assistant_timeout_seconds,
             )
             result = await assistant.ask("Сколько изделий осталось в партии с ID 1?")
@@ -659,6 +822,37 @@ __all__ = ["batch_analytics_service"]
 
 ## Границы текущего этапа
 
-Одна партия по внутреннему ID, общий клиентский ключ на чтение, самодостаточные вопросы. Ассистент использует действующий IP-лимитер проекта, который требует Redis. Отдельный лимит по ключу, бюджет, кэш ответов, trace_id/as_of и Langfuse из LLM_ARCHITECTURE.md ещё не реализованы. Сейчас это первая локальная версия API, не завершение всей A1.
+Одна партия по внутреннему ID, локальный доступ без ключа либо общий клиентский ключ на чтение, самодостаточные вопросы. Ассистент использует действующий IP-лимитер проекта, который требует Redis. Отдельный лимит по ключу, бюджет, кэш ответов, trace_id/as_of и Langfuse из LLM_ARCHITECTURE.md ещё не реализованы. Сейчас это первая локальная версия API, не завершение всей A1.
 
 Проверки: tests/unit/test_assistant_api.py, test_assistant_service.py, test_assistant_dependencies.py, test_llm_adapter.py, test_llm_lifecycle.py. Внешняя модель и БД подменяются, реальные запросы к провайдеру тесты не делают.
+
+### `src/application/ai/schemas.py`
+
+Схемы аргументов инструментов. Отдельны от HTTP-схем и DTO результатов.
+
+```python
+"""Validated arguments for production assistant tools."""
+
+from datetime import date
+
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class BatchStatisticsArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    batch_id: int = Field(gt=0, le=2**31 - 1)
+
+
+class FindBatchesArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    batch_number: int = Field(strict=True, ge=1, le=2**31 - 1)
+    batch_date: date | None = None
+    limit: int = Field(default=5, strict=True, ge=1, le=10)
+```
+
+## Выбор двух инструментов
+
+Модель получает get_batch_statistics и find_batches. Сервис хранит инструменты в словаре по именам, проверяет имя и аргументы, исполняет ровно один инструмент и формирует ответ на сервере. Статистика находится в data, результат поиска — в search (items и total). total=0 даёт not_found, total=1 — answered, total>1 — needs_clarification. Показ одной записи при limit=1 не означает однозначного совпадения. Числа и найденные партии из свободного текста модели не используются.
+
+Пока это два отдельных действия. После поиска кнопка интерфейса подставляет самостоятельный вопрос о статистике ID. Цепочка нескольких инструментов в одном вопросе ещё не реализована.

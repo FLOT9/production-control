@@ -36,6 +36,25 @@ class AssistantApiTests(TestCase):
             finally:
                 self.exited = True
 
+        self.search_read = AsyncMock(
+            return_value=(
+                [
+                    {
+                        "id": 101,
+                        "batch_number": 41,
+                        "batch_date": "2026-11-10",
+                        "work_center_id": 7,
+                        "is_closed": False,
+                    },
+                ],
+                2,
+            )
+        )
+
+        @asynccontextmanager
+        async def search_service():
+            yield SimpleNamespace(list_batches=self.search_read)
+
         self.bound = Mock()
         self.bound.ainvoke = AsyncMock(
             return_value=AIMessage(
@@ -54,6 +73,7 @@ class AssistantApiTests(TestCase):
         self.model.bind_tools.return_value = self.bound
         self.model._client.aclose = AsyncMock()
         for target, value in (
+            ("assistant_local_enabled", False),
             ("assistant_api_key", SecretStr("client-test-key")),
             ("gigachat_auth_key", SecretStr("provider-test-key")),
         ):
@@ -66,6 +86,10 @@ class AssistantApiTests(TestCase):
                 {"return_value": self.model},
             ),
             (
+                "src.api.dependencies.assistant.batch_search_service",
+                {"new": search_service},
+            ),
+            (
                 "src.api.dependencies.assistant.batch_analytics_service",
                 {"new": statistics_service},
             ),
@@ -76,6 +100,7 @@ class AssistantApiTests(TestCase):
                 self.create_model = value
             self.addCleanup(p.stop)
         app = FastAPI()
+        self.app = app
         register_exception_handlers(app)
         app.include_router(router, prefix="/api/v1")
         self.client = TestClient(app)
@@ -111,6 +136,34 @@ class AssistantApiTests(TestCase):
         self.bound.ainvoke.side_effect = choose_tool
         self.assertEqual(self.ask().status_code, 200)
         self.assertTrue(self.exited)
+
+    def test_local_mode_accepts_loopback_without_client_key(self):
+        with (
+            patch.object(settings, "assistant_local_enabled", True),
+            patch.object(settings, "assistant_api_key", None),
+            TestClient(
+                self.app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)
+            ) as client,
+        ):
+            response = client.post("/api/v1/assistant/ask", json={"question": "ID 1?"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "answered")
+
+    def test_local_mode_does_not_bypass_key_for_external_peer_or_host(self):
+        for peer, origin in (
+            ("192.0.2.10", "http://127.0.0.1"),
+            ("127.0.0.1", "http://external.example"),
+        ):
+            with (
+                self.subTest(peer=peer, origin=origin),
+                patch.object(settings, "assistant_local_enabled", True),
+                TestClient(self.app, base_url=origin, client=(peer, 50000)) as client,
+            ):
+                response = client.post(
+                    "/api/v1/assistant/ask", json={"question": "ID 1?"}
+                )
+                self.assertEqual(response.status_code, 401)
+        self.create_model.assert_not_called()
 
     def test_wrong_or_missing_key_does_not_create_model(self):
         for headers in ({}, {"X-API-Key": "wrong"}):
@@ -194,3 +247,29 @@ class AssistantApiTests(TestCase):
             schema = app.openapi()
         operation = schema["paths"]["/api/v1/assistant/ask"]["post"]
         self.assertIn("security", operation)
+
+    def test_search_result_is_serialized_and_both_tools_are_bound(self):
+        self.bound.ainvoke.return_value = AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "name": "find_batches",
+                    "args": {"batch_number": 41, "limit": 1},
+                    "id": "find-call",
+                    "type": "tool_call",
+                }
+            ],
+        )
+        response = self.ask({"question": "Найди партию №41"})
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["status"], "needs_clarification")
+        self.assertEqual(data["search"]["total"], 2)
+        self.assertEqual(data["search"]["items"][0]["batch_date"], "2026-11-10")
+        self.assertIsNone(data["data"])
+        self.assertEqual(data["tools_called"], ["find_batches"])
+        self.assertEqual(
+            {tool.name for tool in self.model.bind_tools.call_args.args[0]},
+            {"get_batch_statistics", "find_batches"},
+        )
+        self.read.assert_not_awaited()

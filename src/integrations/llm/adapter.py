@@ -15,8 +15,8 @@ from src.application.ai.exceptions import (
 class LangChainModelAdapter:
     """Translate provider failures into application exceptions."""
 
-    def __init__(self, model: BaseChatModel, tool: BaseTool) -> None:
-        self.model = model.bind_tools([tool])
+    def __init__(self, model: BaseChatModel, tools: list[BaseTool]) -> None:
+        self.model = model.bind_tools(tools)
 
     async def ainvoke(self, messages: list[BaseMessage]) -> BaseMessage:
         try:

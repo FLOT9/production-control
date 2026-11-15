@@ -20,7 +20,7 @@ class LLMAdapterTests(IsolatedAsyncioTestCase):
         self.bound.ainvoke = AsyncMock()
         model = Mock()
         model.bind_tools.return_value = self.bound
-        self.adapter = LangChainModelAdapter(model, Mock())
+        self.adapter = LangChainModelAdapter(model, [Mock()])
 
     async def test_success_preserves_message(self):
         response = AIMessage(content="Ответ")

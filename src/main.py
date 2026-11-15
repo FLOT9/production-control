@@ -1,7 +1,9 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 from src.api.exception_handlers import register_exception_handlers
 from src.api.middleware.rate_limit import RateLimitMiddleware
@@ -47,3 +49,11 @@ app.include_router(
 @app.get("/health")
 async def health_check() -> dict[str, str]:
     return {"status": "ok"}
+
+
+# Register the UI after API routes so /api/v1/* and /health keep their handlers.
+frontend_directory = Path(__file__).resolve().parent.parent / "frontend" / "public"
+if settings.assistant_local_enabled and frontend_directory.is_dir():
+    app.mount(
+        "/", StaticFiles(directory=frontend_directory, html=True), name="frontend"
+    )
