@@ -12,6 +12,7 @@ from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from src.application.ai.exceptions import AssistantDataUnavailableError
 from src.application.dto.analytics import BatchAnalyticsSnapshot
 from src.application.services.batch_analytics_service import BatchAnalyticsService
+from src.application.services.batch_comparison_service import BatchComparisonService
 from src.application.services.batch_service import BatchService
 from src.core.batch_service_factory import build_batch_service
 from src.core.config import settings
@@ -69,3 +70,9 @@ async def batch_analytics_service() -> AsyncIterator[BatchAnalyticsService]:
 async def batch_search_service() -> AsyncIterator[BatchService]:
     async with _assistant_resources() as (uow, redis):
         yield build_batch_service(uow, redis)
+
+
+@asynccontextmanager
+async def batch_comparison_service() -> AsyncIterator[BatchComparisonService]:
+    async with _assistant_resources() as (uow, _):
+        yield BatchComparisonService(uow)

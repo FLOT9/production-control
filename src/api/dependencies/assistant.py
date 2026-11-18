@@ -7,9 +7,14 @@ from fastapi.security import APIKeyHeader
 
 from src.application.ai.assistant_service import AssistantService
 from src.application.ai.exceptions import AssistantNotConfiguredError
-from src.application.ai.tools import create_find_batches_tool, create_statistics_tool
+from src.application.ai.tools import (
+    create_compare_batches_tool,
+    create_find_batches_tool,
+    create_statistics_tool,
+)
 from src.core.assistant_dependencies import (
     batch_analytics_service,
+    batch_comparison_service,
     batch_search_service,
 )
 from src.core.config import settings
@@ -46,6 +51,7 @@ async def get_assistant_service(
         tools = [
             create_statistics_tool(batch_analytics_service),
             create_find_batches_tool(batch_search_service),
+            create_compare_batches_tool(batch_comparison_service),
         ]
         yield AssistantService(
             LangChainModelAdapter(model, tools),

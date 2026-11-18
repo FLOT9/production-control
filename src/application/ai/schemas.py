@@ -16,3 +16,11 @@ class FindBatchesArgs(BaseModel):
     batch_number: int = Field(strict=True, ge=1, le=2**31 - 1)
     batch_date: date | None = None
     limit: int = Field(default=5, strict=True, ge=1, le=10)
+    include_statistics: bool = Field(
+        default=False,
+        strict=True,
+        description=(
+            "Укажи true, если спрашивают показатели партии по её номеру. "
+            "Для обычного поиска оставь false."
+        ),
+    )

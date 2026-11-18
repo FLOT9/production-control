@@ -248,7 +248,7 @@ class AssistantApiTests(TestCase):
         operation = schema["paths"]["/api/v1/assistant/ask"]["post"]
         self.assertIn("security", operation)
 
-    def test_search_result_is_serialized_and_both_tools_are_bound(self):
+    def test_search_result_is_serialized_and_all_tools_are_bound(self):
         self.bound.ainvoke.return_value = AIMessage(
             content="",
             tool_calls=[
@@ -270,6 +270,53 @@ class AssistantApiTests(TestCase):
         self.assertEqual(data["tools_called"], ["find_batches"])
         self.assertEqual(
             {tool.name for tool in self.model.bind_tools.call_args.args[0]},
-            {"get_batch_statistics", "find_batches"},
+            {"get_batch_statistics", "find_batches", "compare_batches"},
         )
+
+    def test_comparison_uses_database_metrics_for_each_requested_batch(self):
+        compare = AsyncMock(
+            return_value=SimpleNamespace(
+                items=[
+                    SimpleNamespace(
+                        batch_info=SimpleNamespace(id=batch_id),
+                        total_products=10,
+                        aggregated_products=10 - pending,
+                        pending_products=pending,
+                        aggregation_percent=(10 - pending) * 10,
+                        products_per_hour=1.0,
+                    )
+                    for batch_id, pending in [(1, 2), (2, 4)]
+                ]
+            )
+        )
+
+        @asynccontextmanager
+        async def comparison_service():
+            yield SimpleNamespace(compare=compare)
+
+        self.bound.ainvoke.return_value = AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "name": "compare_batches",
+                    "args": {"batch_ids": [1, 2]},
+                    "id": "compare-call",
+                    "type": "tool_call",
+                }
+            ],
+        )
+        with patch(
+            "src.api.dependencies.assistant.batch_comparison_service",
+            new=comparison_service,
+        ):
+            response = self.ask({"question": "Сравни остатки в партиях с ID 1 и 2"})
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["status"], "answered")
+        self.assertEqual(data["tools_called"], ["compare_batches"])
+        first, second = data["answer"].splitlines()
+        self.assertIn("ID 1: всего 10 изд., агрегировано 8, осталось 2", first)
+        self.assertIn("ID 2: всего 10 изд., агрегировано 6, осталось 4", second)
+        compare.assert_awaited_once_with([1, 2])
         self.read.assert_not_awaited()

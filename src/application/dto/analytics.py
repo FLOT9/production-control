@@ -1,7 +1,9 @@
 from datetime import date, datetime
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from src.application.dto.common import PositiveInt32
 
 
 class AnalyticsModel(BaseModel):
@@ -114,3 +116,14 @@ class BatchComparison(AnalyticsModel):
     items: list[BatchComparisonItem]
     average: ComparisonAverage
     overall_products_per_hour: float
+
+
+class BatchComparisonRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    batch_ids: list[PositiveInt32] = Field(min_length=2, max_length=10)
+
+    @model_validator(mode="after")
+    def unique_ids(self) -> Self:
+        if len(self.batch_ids) != len(set(self.batch_ids)):
+            raise ValueError("batch_ids must be unique")
+        return self

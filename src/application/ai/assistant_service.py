@@ -2,7 +2,7 @@ import asyncio
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langchain_core.tools import BaseTool
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 
 from src.application.ai.exceptions import (
     AssistantTimeoutError,
@@ -11,13 +11,17 @@ from src.application.ai.exceptions import (
 )
 from src.application.ai.ports import AssistantModel
 from src.application.ai.schemas import BatchStatisticsArgs, FindBatchesArgs
+from src.application.dto.analytics import BatchComparisonRequest
 from src.application.dto.assistant import (
     AssistantData,
     AssistantResult,
+    BatchComparisonToolItem,
     BatchSearchResult,
     BatchStatisticsResult,
 )
 from src.domain.exceptions.batch import BatchNotFoundError
+
+comparison_items = TypeAdapter(list[BatchComparisonToolItem])
 
 
 class AssistantService:
@@ -31,7 +35,11 @@ class AssistantService:
         self.tools = {tool.name: tool for tool in tools}
         if not self.tools or len(self.tools) != len(tools):
             raise ValueError("Нужны инструменты с уникальными именами")
-        if self.tools.keys() - {"get_batch_statistics", "find_batches"}:
+        if self.tools.keys() - {
+            "get_batch_statistics",
+            "find_batches",
+            "compare_batches",
+        }:
             raise ValueError("Не поддерживается обработка результата инструмента")
         self.model = model
         self.timeout_seconds = timeout_seconds
@@ -48,10 +56,27 @@ class AssistantService:
             SystemMessage(
                 content=(
                     "Ты ассистент производства. "
-                    "Для показателей по внутреннему ID вызывай get_batch_statistics. "
-                    "Для поиска по производственному номеру и дате вызывай find_batches. "
-                    "Номер партии не равен ID: не подставляй номер в batch_id. "
-                    "Если найдено несколько партий, необходимо уточнить дату. "
+                    "Выбери ровно один инструмент. Сначала определи тип идентификатора.\n"
+                    "1. «№123» или «номер партии 123» означает batch_number=123. "
+                    "Вызови find_batches, даже если вопрос про остаток или количество. "
+                    "Число после «№» запрещено передавать в batch_id. "
+                    "Если указана дата, передай её в batch_date в формате ГГГГ-ММ-ДД. "
+                    "Для показателей передай include_statistics=true, "
+                    "для обычного поиска — include_statistics=false.\n"
+                    "2. Если пользователь явно написал «ID 123» и просит показатели, "
+                    "вызови get_batch_statistics(batch_id=123) для одной партии.\n"
+                    "3. Для сравнения партий по внутренним ID вызывай compare_batches. "
+                    "«Сравни остатки в партиях с ID 1 и 2» → "
+                    "compare_batches(batch_ids=[1, 2]).\n"
+                    "Примеры:\n"
+                    "«Сколько изделий осталось в партии с ID 17?» → "
+                    "get_batch_statistics(batch_id=17).\n"
+                    "«Найди партию №41 от 10 ноября 2026 года» → "
+                    'find_batches(batch_number=41, batch_date="2026-11-10", '
+                    "include_statistics=false).\n"
+                    "«Сколько изделий осталось в партии №2026111001 от 10 ноября 2026 года?» → "
+                    'find_batches(batch_number=2026111001, batch_date="2026-11-10", '
+                    "include_statistics=true).\n"
                     "Каждый вопрос самостоятельный. Не выдумывай показатели."
                 )
             ),
@@ -74,62 +99,111 @@ class AssistantService:
         selected_tool = self.tools.get(tool_call["name"])
         if selected_tool is None:
             raise InvalidModelResponseError()
-        schema = (
-            BatchStatisticsArgs
-            if selected_tool.name == "get_batch_statistics"
-            else FindBatchesArgs
-        )
+        if selected_tool.name == "get_batch_statistics":
+            try:
+                statistics_args = BatchStatisticsArgs.model_validate(tool_call["args"])
+            except ValidationError as error:
+                raise InvalidModelResponseError() from error
+            return await self._read_statistics(statistics_args.batch_id)
+        if selected_tool.name == "compare_batches":
+            return await self._compare_batches(selected_tool, tool_call["args"])
+
         try:
-            arguments = schema.model_validate(tool_call["args"]).model_dump()
+            search_args = FindBatchesArgs.model_validate(tool_call["args"])
         except ValidationError as error:
             raise InvalidModelResponseError() from error
-        if selected_tool.name == "get_batch_statistics":
-            batch_id = arguments["batch_id"]
-            if type(batch_id) is not int or not 0 < batch_id <= 2**31 - 1:
-                raise InvalidModelResponseError()
         try:
-            result = await selected_tool.ainvoke(arguments)
+            result = await selected_tool.ainvoke(search_args.model_dump())
+            search = BatchSearchResult.model_validate(result)
+        except ValidationError as error:
+            raise InvalidToolResultError() from error
+
+        if len(search.items) > search_args.limit or any(
+            item.batch_number != search_args.batch_number
+            or (
+                search_args.batch_date is not None
+                and item.batch_date != search_args.batch_date
+            )
+            for item in search.items
+        ):
+            raise InvalidToolResultError()
+
+        if search.total == 1 and search_args.include_statistics:
+            batch = search.items[0]
+            return await self._read_statistics(batch.id, search=search)
+        return self._search_result(search)
+
+    async def _compare_batches(
+        self, tool: BaseTool, args: dict[str, object]
+    ) -> AssistantResult:
+        try:
+            request = BatchComparisonRequest.model_validate(args)
+        except ValidationError as error:
+            raise InvalidModelResponseError() from error
+        try:
+            result = await tool.ainvoke(request.model_dump())
+        except BatchNotFoundError:
+            return AssistantResult(
+                status="not_found",
+                answer="Одна из партий не найдена.",
+                tools_called=[tool.name],
+            )
+        try:
+            items = comparison_items.validate_python(result)
+        except ValidationError as error:
+            raise InvalidToolResultError() from error
+        if [item.batch_id for item in items] != request.batch_ids:
+            raise InvalidToolResultError()
+
+        lines = [
+            f"ID {item.batch_id}: всего {item.total} изд., агрегировано {item.aggregated}, "
+            f"осталось {item.remaining}, выполнение {item.aggregation_percent:g}%, "
+            f"темп за полную смену {item.products_per_hour:g} изд./ч."
+            for item in items
+        ]
+        return AssistantResult(
+            status="answered",
+            answer="\n".join(lines),
+            tools_called=[tool.name],
+        )
+
+    async def _read_statistics(
+        self, batch_id: int, *, search: BatchSearchResult | None = None
+    ) -> AssistantResult:
+        tool = self.tools.get("get_batch_statistics")
+        if tool is None:
+            raise InvalidModelResponseError()
+        tools_called = (
+            ["find_batches", tool.name] if search is not None else [tool.name]
+        )
+        try:
+            result = await tool.ainvoke({"batch_id": batch_id})
         except BatchNotFoundError:
             return AssistantResult(
                 status="not_found",
                 answer="Партия не найдена.",
-                tools_called=[selected_tool.name],
+                tools_called=tools_called,
             )
-        if selected_tool.name == "find_batches":
-            return self._search_result(result, arguments)
-        return self._statistics_result(result, batch_id)
-
-    @staticmethod
-    def _statistics_result(result: object, batch_id: int) -> AssistantResult:
         try:
             statistics = BatchStatisticsResult.model_validate(result)
         except ValidationError as error:
             raise InvalidToolResultError() from error
+        label = f"Партия с ID {batch_id}"
+        if search is not None:
+            batch = search.items[0]
+            label = f"Партия №{batch.batch_number} от {batch.batch_date:%d.%m.%Y} (ID {batch_id})"
         return AssistantResult(
             status="answered",
             answer=(
-                f"Партия с ID {batch_id}: всего {statistics.total} изделий, "
+                f"{label}: всего {statistics.total} изделий, "
                 f"агрегировано {statistics.aggregated}, осталось {statistics.remaining}."
             ),
             data=AssistantData(batch_id=batch_id, **statistics.model_dump()),
-            tools_called=["get_batch_statistics"],
+            tools_called=tools_called,
         )
 
     @staticmethod
-    def _search_result(result: object, arguments: dict[str, object]) -> AssistantResult:
-        try:
-            search = BatchSearchResult.model_validate(result)
-        except ValidationError as error:
-            raise InvalidToolResultError() from error
-        limit = arguments["limit"]
-        if not isinstance(limit, int) or len(search.items) > limit:
-            raise InvalidToolResultError()
-        for item in search.items:
-            if item.batch_number != arguments["batch_number"] or (
-                arguments.get("batch_date") is not None
-                and item.batch_date != arguments["batch_date"]
-            ):
-                raise InvalidToolResultError()
+    def _search_result(search: BatchSearchResult) -> AssistantResult:
         if search.total == 0:
             return AssistantResult(
                 status="not_found",

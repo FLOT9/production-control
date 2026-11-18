@@ -9,10 +9,10 @@ from src.api.dependencies.analytics import (
 )
 from src.api.v1.schemas.analytics import (
     BatchComparisonRead,
-    BatchComparisonRequest,
     DashboardAnalyticsRead,
 )
 from src.api.v1.schemas.common import OptionalPositiveInt32Query
+from src.application.dto.analytics import BatchComparisonRequest
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 

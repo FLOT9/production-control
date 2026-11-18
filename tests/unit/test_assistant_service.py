@@ -32,7 +32,10 @@ class AssistantServiceTests(IsolatedAsyncioTestCase):
         self.read_search = AsyncMock(return_value={"items": [], "total": 0})
 
         async def find_batches(
-            batch_number: int, batch_date=None, limit: int = 5
+            batch_number: int,
+            batch_date=None,
+            limit: int = 5,
+            include_statistics: bool = False,
         ) -> dict:
             """Find batches by number."""
             return await self.read_search(batch_number, batch_date, limit)
@@ -178,6 +181,20 @@ class AssistantServiceTests(IsolatedAsyncioTestCase):
         self.assertIn("Уточните дату", result.answer)
         self.assertIn("Показаны первые 1", result.answer)
         self.assertIsNone(result.data)
+        self.read_statistics.assert_not_awaited()
+
+    async def test_statistics_by_number_requires_a_unique_batch(self):
+        self.bound_model.ainvoke.return_value = self.search_request(
+            limit=1, include_statistics=True
+        )
+        self.read_search.return_value = {"items": [self.found()], "total": 2}
+
+        result = await self.assistant.ask("Сколько осталось в партии №41?")
+
+        self.assertEqual(result.status, "needs_clarification")
+        self.assertIsNone(result.data)
+        self.assertEqual(result.tools_called, ["find_batches"])
+        self.read_search.assert_awaited_once_with(41, None, 1)
         self.read_statistics.assert_not_awaited()
 
     async def test_find_valid_date_is_normalized_before_tool_execution(self):

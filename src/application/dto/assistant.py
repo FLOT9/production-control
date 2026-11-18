@@ -47,6 +47,14 @@ class AssistantData(BatchStatisticsResult):
     batch_id: int = Field(gt=0, le=2**31 - 1)
 
 
+class BatchComparisonToolItem(AssistantData):
+    total: int = Field(ge=0, validation_alias="total_products")
+    aggregated: int = Field(ge=0, validation_alias="aggregated_products")
+    remaining: int = Field(ge=0, validation_alias="pending_products")
+    aggregation_percent: float = Field(ge=0, le=100)
+    products_per_hour: float = Field(ge=0, allow_inf_nan=False)
+
+
 class AssistantResult(BaseModel):
     status: Literal["answered", "not_found", "insufficient_data", "needs_clarification"]
     answer: str
