@@ -9,10 +9,12 @@ from src.application.ai.assistant_service import AssistantService
 from src.application.ai.exceptions import AssistantNotConfiguredError
 from src.application.ai.tools import (
     create_compare_batches_tool,
+    create_dashboard_tool,
     create_find_batches_tool,
     create_statistics_tool,
 )
 from src.core.assistant_dependencies import (
+    analytics_dashboard_service,
     batch_analytics_service,
     batch_comparison_service,
     batch_search_service,
@@ -52,6 +54,7 @@ async def get_assistant_service(
             create_statistics_tool(batch_analytics_service),
             create_find_batches_tool(batch_search_service),
             create_compare_batches_tool(batch_comparison_service),
+            create_dashboard_tool(analytics_dashboard_service),
         ]
         yield AssistantService(
             LangChainModelAdapter(model, tools),

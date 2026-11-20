@@ -55,6 +55,12 @@ class BatchComparisonToolItem(AssistantData):
     products_per_hour: float = Field(ge=0, allow_inf_nan=False)
 
 
+class DashboardToolResult(BaseModel):
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+    aggregated_products: int = Field(ge=0)
+
+
 class AssistantResult(BaseModel):
     status: Literal["answered", "not_found", "insufficient_data", "needs_clarification"]
     answer: str

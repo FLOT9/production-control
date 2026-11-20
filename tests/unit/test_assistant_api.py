@@ -1,5 +1,6 @@
 import asyncio
 from contextlib import asynccontextmanager
+from datetime import date
 from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import AsyncMock, Mock, patch
@@ -270,7 +271,58 @@ class AssistantApiTests(TestCase):
         self.assertEqual(data["tools_called"], ["find_batches"])
         self.assertEqual(
             {tool.name for tool in self.model.bind_tools.call_args.args[0]},
-            {"get_batch_statistics", "find_batches", "compare_batches"},
+            {
+                "get_batch_statistics",
+                "find_batches",
+                "compare_batches",
+                "get_dashboard",
+            },
+        )
+
+    def test_dashboard_validates_dates_before_opening_service(self):
+        get_dashboard = AsyncMock(
+            return_value=SimpleNamespace(
+                summary=SimpleNamespace(aggregated_products=12)
+            )
+        )
+        opened = Mock()
+
+        @asynccontextmanager
+        async def dashboard_service():
+            opened()
+            yield SimpleNamespace(get_dashboard=get_dashboard)
+
+        with patch(
+            "src.api.dependencies.assistant.analytics_dashboard_service",
+            new=dashboard_service,
+        ):
+            for start, expected in [("2026-09-05", 200), ("2026-09-06", 503)]:
+                with self.subTest(start=start):
+                    self.bound.ainvoke.return_value = AIMessage(
+                        content="",
+                        tool_calls=[
+                            {
+                                "name": "get_dashboard",
+                                "args": {"date_from": start, "date_to": "2026-09-05"},
+                                "id": "dashboard-call",
+                                "type": "tool_call",
+                            }
+                        ],
+                    )
+                    response = self.ask({"question": "Сводка по партиям от 5 сентября"})
+                    self.assertEqual(response.status_code, expected)
+                    if expected == 200:
+                        self.assertEqual(
+                            response.json()["tools_called"], ["get_dashboard"]
+                        )
+                        self.assertIn("12 изд.", response.json()["answer"])
+
+        opened.assert_called_once()
+        get_dashboard.assert_awaited_once_with(
+            date_from=date(2026, 9, 5),
+            date_to=date(2026, 9, 5),
+            work_center_id=None,
+            shift=None,
         )
 
     def test_comparison_uses_database_metrics_for_each_requested_batch(self):

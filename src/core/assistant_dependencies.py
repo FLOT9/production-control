@@ -10,7 +10,10 @@ from sqlalchemy.exc import DisconnectionError, InterfaceError, OperationalError
 from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 
 from src.application.ai.exceptions import AssistantDataUnavailableError
-from src.application.dto.analytics import BatchAnalyticsSnapshot
+from src.application.dto.analytics import BatchAnalyticsSnapshot, DashboardAnalytics
+from src.application.services.analytics_dashboard_service import (
+    AnalyticsDashboardService,
+)
 from src.application.services.batch_analytics_service import BatchAnalyticsService
 from src.application.services.batch_comparison_service import BatchComparisonService
 from src.application.services.batch_service import BatchService
@@ -76,3 +79,14 @@ async def batch_search_service() -> AsyncIterator[BatchService]:
 async def batch_comparison_service() -> AsyncIterator[BatchComparisonService]:
     async with _assistant_resources() as (uow, _):
         yield BatchComparisonService(uow)
+
+
+@asynccontextmanager
+async def analytics_dashboard_service() -> AsyncIterator[AnalyticsDashboardService]:
+    async with _assistant_resources() as (uow, redis):
+        yield AnalyticsDashboardService(
+            uow,
+            AnalyticsCache(
+                redis, DashboardAnalytics, settings.dashboard_cache_ttl_seconds
+            ),
+        )

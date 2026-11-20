@@ -4,10 +4,17 @@ from datetime import date
 
 from langchain_core.tools import BaseTool, tool
 
-from src.application.ai.schemas import BatchStatisticsArgs, FindBatchesArgs
+from src.application.ai.schemas import (
+    BatchStatisticsArgs,
+    DashboardArgs,
+    FindBatchesArgs,
+)
 from src.application.dto import BatchFilters
 from src.application.dto.analytics import BatchComparisonRequest
 from src.application.dto.assistant import FoundBatch
+from src.application.services.analytics_dashboard_service import (
+    AnalyticsDashboardService,
+)
 from src.application.services.batch_analytics_service import BatchAnalyticsService
 from src.application.services.batch_comparison_service import BatchComparisonService
 from src.application.services.batch_service import BatchService
@@ -105,3 +112,20 @@ def create_compare_batches_tool(
         ]
 
     return compare_batches
+
+
+def create_dashboard_tool(
+    service_factory: Callable[
+        [], AbstractAsyncContextManager[AnalyticsDashboardService]
+    ],
+) -> BaseTool:
+    @tool(args_schema=DashboardArgs)
+    async def get_dashboard(date_from: date, date_to: date) -> dict[str, int]:
+        """Получить число агрегированных изделий в партиях за выбранные даты."""
+        async with service_factory() as service:
+            result = await service.get_dashboard(
+                date_from=date_from, date_to=date_to, work_center_id=None, shift=None
+            )
+        return {"aggregated_products": result.summary.aggregated_products}
+
+    return get_dashboard

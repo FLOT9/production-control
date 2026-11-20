@@ -10,7 +10,11 @@ from src.application.ai.exceptions import (
     InvalidToolResultError,
 )
 from src.application.ai.ports import AssistantModel
-from src.application.ai.schemas import BatchStatisticsArgs, FindBatchesArgs
+from src.application.ai.schemas import (
+    BatchStatisticsArgs,
+    DashboardArgs,
+    FindBatchesArgs,
+)
 from src.application.dto.analytics import BatchComparisonRequest
 from src.application.dto.assistant import (
     AssistantData,
@@ -18,6 +22,7 @@ from src.application.dto.assistant import (
     BatchComparisonToolItem,
     BatchSearchResult,
     BatchStatisticsResult,
+    DashboardToolResult,
 )
 from src.domain.exceptions.batch import BatchNotFoundError
 
@@ -39,6 +44,7 @@ class AssistantService:
             "get_batch_statistics",
             "find_batches",
             "compare_batches",
+            "get_dashboard",
         }:
             raise ValueError("Не поддерживается обработка результата инструмента")
         self.model = model
@@ -68,6 +74,11 @@ class AssistantService:
                     "3. Для сравнения партий по внутренним ID вызывай compare_batches. "
                     "«Сравни остатки в партиях с ID 1 и 2» → "
                     "compare_batches(batch_ids=[1, 2]).\n"
+                    "4. Для сводки по дате партий вызывай get_dashboard. "
+                    "Например, «Сколько сейчас агрегировано изделий в партиях от 5 сентября "
+                    '2026 года?» → get_dashboard(date_from="2026-09-05", date_to="2026-09-05"). '
+                    "Если вопрос про дату самой операции, например «Сколько изделий "
+                    "агрегировали 5 сентября?», не вызывай get_dashboard.\n"
                     "Примеры:\n"
                     "«Сколько изделий осталось в партии с ID 17?» → "
                     "get_batch_statistics(batch_id=17).\n"
@@ -107,6 +118,8 @@ class AssistantService:
             return await self._read_statistics(statistics_args.batch_id)
         if selected_tool.name == "compare_batches":
             return await self._compare_batches(selected_tool, tool_call["args"])
+        if selected_tool.name == "get_dashboard":
+            return await self._get_dashboard(selected_tool, tool_call["args"])
 
         try:
             search_args = FindBatchesArgs.model_validate(tool_call["args"])
@@ -132,6 +145,27 @@ class AssistantService:
             batch = search.items[0]
             return await self._read_statistics(batch.id, search=search)
         return self._search_result(search)
+
+    async def _get_dashboard(
+        self, tool: BaseTool, args: dict[str, object]
+    ) -> AssistantResult:
+        try:
+            request = DashboardArgs.model_validate(args)
+        except ValidationError as error:
+            raise InvalidModelResponseError() from error
+        try:
+            result = await tool.ainvoke(request.model_dump())
+            dashboard = DashboardToolResult.model_validate(result)
+        except ValidationError as error:
+            raise InvalidToolResultError() from error
+        return AssistantResult(
+            status="answered",
+            answer=(
+                f"Дата партии с {request.date_from:%d.%m.%Y} по {request.date_to:%d.%m.%Y}. "
+                f"Сейчас агрегировано: {dashboard.aggregated_products} изд."
+            ),
+            tools_called=[tool.name],
+        )
 
     async def _compare_batches(
         self, tool: BaseTool, args: dict[str, object]
