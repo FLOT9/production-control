@@ -15,11 +15,14 @@ class FoundBatch(BaseModel):
     shift: str | None = None
 
 
-class BatchSearchResult(BaseModel):
+class BatchCountResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    items: list[FoundBatch] = Field(max_length=10)
     total: int = Field(strict=True, ge=0)
+
+
+class BatchSearchResult(BatchCountResult):
+    items: list[FoundBatch] = Field(max_length=10)
 
     @model_validator(mode="after")
     def check_page(self) -> "BatchSearchResult":

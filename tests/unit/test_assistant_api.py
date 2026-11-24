@@ -55,9 +55,13 @@ class AssistantApiTests(TestCase):
             )
         )
 
+        self.search_count = AsyncMock(return_value=0)
+
         @asynccontextmanager
         async def search_service():
-            yield SimpleNamespace(list_batches=self.search_read)
+            yield SimpleNamespace(
+                list_batches=self.search_read, count_batches=self.search_count
+            )
 
         self.bound = Mock()
         self.bound.ainvoke = AsyncMock(
@@ -283,9 +287,7 @@ class AssistantApiTests(TestCase):
             },
         )
 
-    def test_count_open_batches_uses_total_instead_of_page_size(self):
-        items, _ = self.search_read.return_value
-        self.search_read.return_value = ([{**items[0], "shift": "1"}], 12)
+    def test_count_open_batches_does_not_read_a_page(self):
         self.bound.ainvoke.return_value = AIMessage(
             content="",
             tool_calls=[
@@ -306,13 +308,28 @@ class AssistantApiTests(TestCase):
         )
         response = self.ask({"question": "Сколько открытых партий в цехе с ID 7?"})
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["answer"], "Партий по заданным фильтрам: 12.")
-        filters = self.search_read.await_args.kwargs["filters"]
+        self.assertEqual(response.json()["answer"], "Партий по заданным фильтрам: 0.")
+        self.search_read.assert_not_awaited()
+        self.search_count.assert_awaited_once()
+        filters = self.search_count.await_args.kwargs["filters"]
         self.assertEqual(filters.work_center_id, 7)
         self.assertIs(filters.is_closed, False)
         self.assertEqual(filters.shift, "1")
         self.assertEqual(filters.date_from, date(2026, 11, 9))
         self.assertEqual(filters.date_to, date(2026, 11, 10))
+
+    def test_question_with_work_center_name_gets_id_hint_without_tool_calls(self):
+        self.bound.ainvoke.return_value = AIMessage(content="Уточните цех.")
+        response = self.ask(
+            {"question": "Сколько изделий агрегировали вчера в цехе Сборка?"}
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["tools_called"], [])
+        self.assertTrue(
+            response.json()["answer"].startswith(
+                "Для подсчёта по цеху укажите его внутренний ID."
+            )
+        )
 
     def test_aggregation_count_uses_the_operation_day(self):
         count = AsyncMock(return_value=7)

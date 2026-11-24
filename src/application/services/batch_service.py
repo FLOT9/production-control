@@ -441,6 +441,9 @@ class BatchService:
 
         return saved_batch
 
+    async def count_batches(self, *, filters: BatchFilters) -> int:
+        return await self.uow.batches.count_by_filters(filters=filters)
+
     async def list_batches(
         self,
         *,

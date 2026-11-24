@@ -25,6 +25,7 @@ from src.application.dto.assistant import (
     AssistantData,
     AssistantResult,
     BatchComparisonToolItem,
+    BatchCountResult,
     BatchSearchResult,
     BatchStatisticsToolResult,
     DashboardToolResult,
@@ -130,7 +131,10 @@ class AssistantService:
         if not response.tool_calls:
             return AssistantResult(
                 status="insufficient_data",
-                answer="Недостаточно данных. Укажите ID партии или её номер и дату для поиска.",
+                answer=(
+                    "Для подсчёта по цеху укажите его внутренний ID. "
+                    "Для поиска партии укажите её ID либо номер и дату."
+                ),
             )
         if len(response.tool_calls) != 1:
             raise InvalidModelResponseError()
@@ -162,6 +166,13 @@ class AssistantService:
             result = await selected_tool.ainvoke(
                 search_args.model_dump(exclude_defaults=True)
             )
+            if search_args.count_only:
+                count = BatchCountResult.model_validate(result)
+                return AssistantResult(
+                    status="answered",
+                    answer=f"Партий по заданным фильтрам: {count.total}.",
+                    tools_called=["find_batches"],
+                )
             search = BatchSearchResult.model_validate(result)
         except ValidationError as error:
             raise InvalidToolResultError() from error
@@ -196,12 +207,6 @@ class AssistantService:
         ):
             raise InvalidToolResultError()
 
-        if search_args.count_only:
-            return AssistantResult(
-                status="answered",
-                answer=f"Партий по заданным фильтрам: {search.total}.",
-                tools_called=["find_batches"],
-            )
         if search.total == 1 and search_args.include_statistics:
             batch = search.items[0]
             return await self._read_statistics(batch.id, search=search)

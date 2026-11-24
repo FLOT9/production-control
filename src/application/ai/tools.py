@@ -77,7 +77,7 @@ def create_find_batches_tool(
         count_only: bool = False,
     ) -> dict[str, object]:
         """Найти или посчитать партии по номеру, датам, ID цеха, смене и статусу."""
-        # include_statistics и count_only используются обработчиком ассистента.
+        # include_statistics используется обработчиком ассистента.
         filters = BatchFilters(
             batch_number=batch_number,
             batch_date=batch_date,
@@ -88,6 +88,8 @@ def create_find_batches_tool(
             is_closed=is_closed,
         )
         async with service_factory() as service:
+            if count_only:
+                return {"total": await service.count_batches(filters=filters)}
             items, total = await find_batches(service, filters, limit)
 
         return {
