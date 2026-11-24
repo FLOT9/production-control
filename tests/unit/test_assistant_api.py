@@ -357,12 +357,18 @@ class AssistantApiTests(TestCase):
         with patch(
             "src.api.dependencies.assistant.analytics_dashboard_service"
         ) as service_factory:
-            response = self.ask(
-                {"question": "Сколько изделий вчера агрегировали в цехе Сборка?"}
-            )
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["tools_called"], [])
-        self.assertIn("Укажите внутренний ID цеха", response.json()["answer"])
+            for question in (
+                "Сколько изделий вчера агрегировали в цехе Сборка?",
+                "Сколько изделий из партии с ID 1 вчера агрегировали в цехе Сборка?",
+                "Сколько изделий вчера агрегировали в цехе с ID 2?",
+            ):
+                with self.subTest(question=question):
+                    response = self.ask({"question": question})
+                    self.assertEqual(response.status_code, 200)
+                    self.assertEqual(response.json()["tools_called"], [])
+                    self.assertIn(
+                        "Укажите внутренний ID цеха", response.json()["answer"]
+                    )
         service_factory.assert_not_called()
 
     def test_aggregation_count_uses_the_operation_day(self):
@@ -452,8 +458,12 @@ class AssistantApiTests(TestCase):
             new=dashboard_service,
         ):
             responses = [
-                self.ask({"question": "Сколько изделий агрегировали в цехе с ID 12?"})
-                for _ in range(3)
+                self.ask({"question": f"Сколько изделий агрегировали {center}?"})
+                for center in (
+                    "в цехе с внутренним идентификатором 12",
+                    "в цехе с ID 12",
+                    "по ID цеха 12",
+                )
             ]
 
         for response in responses:
