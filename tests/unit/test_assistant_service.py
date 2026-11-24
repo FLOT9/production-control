@@ -1,8 +1,9 @@
+import json
 from unittest import IsolatedAsyncioTestCase
 from unittest.mock import AsyncMock, Mock
 
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.tools import StructuredTool
 
 from src.application.ai.assistant_service import AssistantService
@@ -197,6 +198,50 @@ class AssistantServiceTests(IsolatedAsyncioTestCase):
         self.assertEqual(result.tools_called, ["find_batches"])
         self.read_search.assert_awaited_once_with(41, None, 1)
         self.read_statistics.assert_not_awaited()
+        self.assertEqual(self.bound_model.ainvoke.await_count, 1)
+
+    async def test_unique_search_sends_its_result_to_the_model(self):
+        first = self.search_request(include_statistics=True)
+        self.bound_model.ainvoke.side_effect = [first, self.request(batch_id=101)]
+        self.read_search.return_value = {"items": [self.found()], "total": 1}
+
+        result = await self.assistant.ask("Сколько осталось в партии №41?")
+
+        self.assertEqual(result.tools_called, ["find_batches", "get_batch_statistics"])
+        self.assertEqual(self.bound_model.ainvoke.await_count, 2)
+        original, follow_up = [
+            call.args[0] for call in self.bound_model.ainvoke.await_args_list
+        ]
+        self.assertEqual(follow_up[:-2], original)
+        self.assertIs(follow_up[-2], first)
+        tool_message = follow_up[-1]
+        self.assertIsInstance(tool_message, ToolMessage)
+        self.assertEqual(tool_message.name, "find_batches")
+        self.assertEqual(tool_message.tool_call_id, "search-call")
+        self.assertEqual(json.loads(tool_message.content), {"batch_id": 101})
+        self.read_statistics.assert_awaited_once_with(101)
+
+    async def test_invalid_follow_up_uses_only_the_id_found_by_the_search(self):
+        for follow_up in (
+            self.request(batch_id=999),
+            self.search_request(),
+            AIMessage(content="Осталось 999 изделий."),
+        ):
+            with self.subTest(follow_up=follow_up):
+                self.bound_model.ainvoke.reset_mock()
+                self.read_statistics.reset_mock()
+                self.bound_model.ainvoke.side_effect = [
+                    self.search_request(include_statistics=True),
+                    follow_up,
+                ]
+                self.read_search.return_value = {"items": [self.found()], "total": 1}
+
+                result = await self.assistant.ask("Сколько осталось в партии №41?")
+
+                self.assertIn("ID 101", result.answer)
+                self.assertNotIn("999", result.answer)
+                self.assertEqual(self.bound_model.ainvoke.await_count, 2)
+                self.read_statistics.assert_awaited_once_with(101)
 
     async def test_find_valid_date_is_normalized_before_tool_execution(self):
         from datetime import date

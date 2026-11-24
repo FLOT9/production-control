@@ -319,17 +319,51 @@ class AssistantApiTests(TestCase):
         self.assertEqual(filters.date_to, date(2026, 11, 10))
 
     def test_question_with_work_center_name_gets_id_hint_without_tool_calls(self):
-        self.bound.ainvoke.return_value = AIMessage(content="Уточните цех.")
+        self.bound.ainvoke.return_value = AIMessage(content="NEED_WORK_CENTER_ID")
         response = self.ask(
             {"question": "Сколько изделий агрегировали вчера в цехе Сборка?"}
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["tools_called"], [])
-        self.assertTrue(
-            response.json()["answer"].startswith(
-                "Для подсчёта по цеху укажите его внутренний ID."
-            )
+        self.assertEqual(response.json()["status"], "insufficient_data")
+        self.assertEqual(
+            response.json()["answer"],
+            "Укажите внутренний ID цеха, например «цех с ID 2».",
         )
+
+    def test_off_topic_question_gets_fixed_reply_without_tool_calls(self):
+        self.bound.ainvoke.return_value = AIMessage(content="OUT_OF_SCOPE")
+        response = self.ask({"question": "Какая завтра погода?"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "out_of_scope")
+        self.assertEqual(
+            response.json()["answer"],
+            "Я могу помочь с партиями и производственной статистикой.",
+        )
+        self.assertEqual(response.json()["tools_called"], [])
+
+    def test_aggregation_does_not_use_a_work_center_id_invented_by_the_model(self):
+        self.bound.ainvoke.return_value = AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "name": "count_aggregated_on",
+                    "args": {"day": "yesterday", "work_center_id": 1},
+                    "id": "invented-work-center",
+                    "type": "tool_call",
+                }
+            ],
+        )
+        with patch(
+            "src.api.dependencies.assistant.analytics_dashboard_service"
+        ) as service_factory:
+            response = self.ask(
+                {"question": "Сколько изделий вчера агрегировали в цехе Сборка?"}
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["tools_called"], [])
+        self.assertIn("Укажите внутренний ID цеха", response.json()["answer"])
+        service_factory.assert_not_called()
 
     def test_aggregation_count_uses_the_operation_day(self):
         count = AsyncMock(return_value=7)

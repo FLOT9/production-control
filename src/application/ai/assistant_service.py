@@ -1,8 +1,16 @@
 import asyncio
+import json
+import re
 from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
+from langchain_core.messages import (
+    AIMessage,
+    BaseMessage,
+    HumanMessage,
+    SystemMessage,
+    ToolMessage,
+)
 from langchain_core.tools import BaseTool
 from pydantic import TypeAdapter, ValidationError
 
@@ -11,6 +19,7 @@ from src.application.ai.exceptions import (
     AssistantTimeoutError,
     InvalidModelResponseError,
     InvalidToolResultError,
+    LLMUnavailableError,
 )
 from src.application.ai.ports import AssistantModel
 from src.application.ai.schemas import (
@@ -35,6 +44,8 @@ from src.domain.exceptions.batch import BatchNotFoundError
 from src.domain.exceptions.work_center import WorkCenterNotFoundError
 
 comparison_items = TypeAdapter(list[BatchComparisonToolItem])
+WORK_CENTER_ID_HINT = "Укажите внутренний ID цеха, например «цех с ID 2»."
+EXPLICIT_ID = re.compile(r"\bID\s*[:=#№]?\s*([0-9]{1,10})\b", re.IGNORECASE)
 
 
 class AssistantService:
@@ -71,7 +82,10 @@ class AssistantService:
             SystemMessage(
                 content=(
                     "Ты ассистент производства. "
-                    "Выбери ровно один инструмент. Сначала определи тип идентификатора.\n"
+                    "Выбери не более одного инструмента за ответ. "
+                    "Если после find_batches получен результат с batch_id и запрошены "
+                    "показатели партии, вызови get_batch_statistics с этим batch_id. "
+                    "Для первого вызова определи тип идентификатора.\n"
                     "1. «№123» или «номер партии 123» означает batch_number=123. "
                     "Вызови find_batches, даже если вопрос про остаток или количество изделий. "
                     "Число после «№» запрещено передавать в batch_id. "
@@ -107,7 +121,7 @@ class AssistantService:
                     "«Сколько изделий агрегировали за прошлую неделю?» → "
                     'count_aggregated_on(period="last_week"). '
                     "Дата, диапазон и last_week взаимоисключающие. Если цех указан только "
-                    "по названию или номеру, не вызывай инструмент. "
+                    "по названию или номеру, верни NEED_WORK_CENTER_ID без инструмента. "
                     "Без указанного цеха опусти work_center_id.\n"
                     "Примеры:\n"
                     "«Сколько изделий осталось в партии с ID 17?» → "
@@ -118,6 +132,11 @@ class AssistantService:
                     "«Сколько изделий осталось в партии №2026111001 от 10 ноября 2026 года?» → "
                     'find_batches(batch_number=2026111001, batch_date="2026-11-10", '
                     "include_statistics=true).\n"
+                    "На вопросы вне производственной статистики верни только OUT_OF_SCOPE "
+                    "без вызова инструмента. Например, «Какая завтра погода?» → OUT_OF_SCOPE. "
+                    "Если для подсчёта агрегаций цех задан только по названию или номеру, "
+                    "верни только NEED_WORK_CENTER_ID. Например, «Сколько изделий вчера "
+                    "агрегировали в цехе Сборка?» → NEED_WORK_CENTER_ID. "
                     "Каждый вопрос самостоятельный. Не выдумывай показатели."
                 )
             ),
@@ -129,13 +148,7 @@ class AssistantService:
         if response.invalid_tool_calls:
             raise InvalidModelResponseError()
         if not response.tool_calls:
-            return AssistantResult(
-                status="insufficient_data",
-                answer=(
-                    "Для подсчёта по цеху укажите его внутренний ID. "
-                    "Для поиска партии укажите её ID либо номер и дату."
-                ),
-            )
+            return self._answer_without_tool(response)
         if len(response.tool_calls) != 1:
             raise InvalidModelResponseError()
 
@@ -155,7 +168,7 @@ class AssistantService:
             return await self._get_dashboard(selected_tool, tool_call["args"])
         if selected_tool.name == "count_aggregated_on":
             return await self._count_aggregated_on(
-                selected_tool, tool_call["args"], now=now
+                selected_tool, tool_call["args"], now=now, question=question
             )
 
         try:
@@ -208,19 +221,84 @@ class AssistantService:
             raise InvalidToolResultError()
 
         if search.total == 1 and search_args.include_statistics:
-            batch = search.items[0]
-            return await self._read_statistics(batch.id, search=search)
+            batch_id = await self._select_statistics_batch_id(
+                messages, response, search.items[0].id
+            )
+            return await self._read_statistics(batch_id, search=search)
         return self._search_result(
             search, clarify_number=search_args.batch_number is not None
         )
 
+    async def _select_statistics_batch_id(
+        self, messages: list[BaseMessage], first_response: AIMessage, found_id: int
+    ) -> int:
+        search_call = first_response.tool_calls[0]
+        call_id = search_call.get("id")
+        if not call_id or "get_batch_statistics" not in self.tools:
+            return found_id
+
+        follow_up = [
+            *messages,
+            first_response,
+            ToolMessage(
+                name=search_call["name"],
+                tool_call_id=call_id,
+                content=json.dumps({"batch_id": found_id}),
+            ),
+        ]
+        try:
+            response = await self.model.ainvoke(follow_up)
+        except (AssistantTimeoutError, InvalidModelResponseError, LLMUnavailableError):
+            return found_id
+        if (
+            not isinstance(response, AIMessage)
+            or response.invalid_tool_calls
+            or len(response.tool_calls) != 1
+        ):
+            return found_id
+        call = response.tool_calls[0]
+        if call["name"] != "get_batch_statistics":
+            return found_id
+        try:
+            request = BatchStatisticsArgs.model_validate(call["args"])
+        except ValidationError:
+            return found_id
+        return request.batch_id if request.batch_id == found_id else found_id
+
+    @staticmethod
+    def _answer_without_tool(response: AIMessage) -> AssistantResult:
+        marker = response.content.strip() if isinstance(response.content, str) else ""
+        if marker == "OUT_OF_SCOPE":
+            return AssistantResult(
+                status="out_of_scope",
+                answer="Я могу помочь с партиями и производственной статистикой.",
+            )
+        if marker == "NEED_WORK_CENTER_ID":
+            return AssistantResult(
+                status="insufficient_data",
+                answer=WORK_CENTER_ID_HINT,
+            )
+        return AssistantResult(
+            status="insufficient_data",
+            answer=(
+                "Для подсчёта по цеху укажите его внутренний ID. "
+                "Для поиска партии укажите её ID либо номер и дату."
+            ),
+        )
+
     async def _count_aggregated_on(
-        self, tool: BaseTool, args: dict[str, object], *, now: datetime
+        self, tool: BaseTool, args: dict[str, object], *, now: datetime, question: str
     ) -> AssistantResult:
         try:
             request = AggregationDayArgs.model_validate(args)
         except ValidationError as error:
             raise InvalidModelResponseError() from error
+        if request.work_center_id is not None and request.work_center_id not in {
+            int(value) for value in EXPLICIT_ID.findall(question)
+        }:
+            return AssistantResult(
+                status="insufficient_data", answer=WORK_CENTER_ID_HINT
+            )
         start, end = resolve_aggregation_range(
             request, now, ZoneInfo(settings.production_timezone)
         )

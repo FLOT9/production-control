@@ -5,7 +5,7 @@
   let mount = null;
   const arrow = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg>';
   const spark = '<svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="m16 3 3.7 9.3L29 16l-9.3 3.7L16 29l-3.7-9.3L3 16l9.3-3.7L16 3Z"/></svg>';
-  const labels = { answered: "Данные получены", not_found: "Партия не найдена", insufficient_data: "Нужно уточнение", needs_clarification: "Уточните дату" };
+  const labels = { answered: "Данные получены", not_found: "Партия не найдена", insufficient_data: "Нужно уточнение", needs_clarification: "Уточните дату", out_of_scope: "Вне темы" };
   const format = value => new Intl.NumberFormat("ru-RU").format(value);
   const el = (tag, className, text) => {
     const node = document.createElement(tag);

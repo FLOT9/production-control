@@ -75,7 +75,13 @@ class AggregationDayToolResult(DashboardToolResult):
 
 
 class AssistantResult(BaseModel):
-    status: Literal["answered", "not_found", "insufficient_data", "needs_clarification"]
+    status: Literal[
+        "answered",
+        "not_found",
+        "insufficient_data",
+        "needs_clarification",
+        "out_of_scope",
+    ]
     answer: str
     data: AssistantData | None = None
     search: BatchSearchResult | None = None
