@@ -1,9 +1,12 @@
 import asyncio
+from datetime import UTC, datetime
+from zoneinfo import ZoneInfo
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langchain_core.tools import BaseTool
 from pydantic import TypeAdapter, ValidationError
 
+from src.application.ai.aggregation_day import resolve_aggregation_range
 from src.application.ai.exceptions import (
     AssistantTimeoutError,
     InvalidModelResponseError,
@@ -11,20 +14,24 @@ from src.application.ai.exceptions import (
 )
 from src.application.ai.ports import AssistantModel
 from src.application.ai.schemas import (
+    AggregationDayArgs,
     BatchStatisticsArgs,
     DashboardArgs,
     FindBatchesArgs,
 )
 from src.application.dto.analytics import BatchComparisonRequest
 from src.application.dto.assistant import (
+    AggregationDayToolResult,
     AssistantData,
     AssistantResult,
     BatchComparisonToolItem,
     BatchSearchResult,
-    BatchStatisticsResult,
+    BatchStatisticsToolResult,
     DashboardToolResult,
 )
+from src.core.config import settings
 from src.domain.exceptions.batch import BatchNotFoundError
+from src.domain.exceptions.work_center import WorkCenterNotFoundError
 
 comparison_items = TypeAdapter(list[BatchComparisonToolItem])
 
@@ -45,6 +52,7 @@ class AssistantService:
             "find_batches",
             "compare_batches",
             "get_dashboard",
+            "count_aggregated_on",
         }:
             raise ValueError("Не поддерживается обработка результата инструмента")
         self.model = model
@@ -53,32 +61,53 @@ class AssistantService:
     async def ask(self, question: str) -> AssistantResult:
         try:
             async with asyncio.timeout(self.timeout_seconds):
-                return await self._ask(question)
+                return await self._ask(question, now=datetime.now(UTC))
         except TimeoutError as error:
             raise AssistantTimeoutError() from error
 
-    async def _ask(self, question: str) -> AssistantResult:
+    async def _ask(self, question: str, *, now: datetime) -> AssistantResult:
         messages: list[BaseMessage] = [
             SystemMessage(
                 content=(
                     "Ты ассистент производства. "
                     "Выбери ровно один инструмент. Сначала определи тип идентификатора.\n"
                     "1. «№123» или «номер партии 123» означает batch_number=123. "
-                    "Вызови find_batches, даже если вопрос про остаток или количество. "
+                    "Вызови find_batches, даже если вопрос про остаток или количество изделий. "
                     "Число после «№» запрещено передавать в batch_id. "
                     "Если указана дата, передай её в batch_date в формате ГГГГ-ММ-ДД. "
-                    "Для показателей передай include_statistics=true, "
+                    "Для показателей конкретной партии передай include_statistics=true, "
                     "для обычного поиска — include_statistics=false.\n"
+                    "Для списка партий и вопросов «сколько партий» используй find_batches. "
+                    "Укажи нужные фильтры: batch_date или date_from/date_to, внутренний "
+                    "work_center_id, shift, is_closed=false для открытых или true для закрытых. "
+                    "Для количества партий передай count_only=true. Например, «Сколько "
+                    "открытых партий в цехе с ID 2?» → "
+                    "find_batches(work_center_id=2, is_closed=false, count_only=true).\n"
                     "2. Если пользователь явно написал «ID 123» и просит показатели, "
                     "вызови get_batch_statistics(batch_id=123) для одной партии.\n"
                     "3. Для сравнения партий по внутренним ID вызывай compare_batches. "
                     "«Сравни остатки в партиях с ID 1 и 2» → "
                     "compare_batches(batch_ids=[1, 2]).\n"
                     "4. Для сводки по дате партий вызывай get_dashboard. "
+                    "Если указаны внутренний ID цеха или смена, передай work_center_id и shift. "
                     "Например, «Сколько сейчас агрегировано изделий в партиях от 5 сентября "
                     '2026 года?» → get_dashboard(date_from="2026-09-05", date_to="2026-09-05"). '
-                    "Если вопрос про дату самой операции, например «Сколько изделий "
-                    "агрегировали 5 сентября?», не вызывай get_dashboard.\n"
+                    "5. Для подсчёта по дате самой операции за день или период "
+                    "вызывай count_aggregated_on. "
+                    "«Сколько изделий агрегировали 5 сентября 2026 года?» → "
+                    'count_aggregated_on(day="2026-09-05"). '
+                    'Для «сегодня» передай day="today", для «вчера» — day="yesterday". '
+                    "«Сколько изделий агрегировали вчера?» → "
+                    'count_aggregated_on(day="yesterday"). '
+                    "Если явно указан внутренний ID цеха, передай его в work_center_id. "
+                    "«Сколько изделий вчера агрегировали в цехе с ID 12?» → "
+                    'count_aggregated_on(day="yesterday", work_center_id=12). '
+                    "Для диапазона передай date_from и date_to включительно. "
+                    "«Сколько изделий агрегировали за прошлую неделю?» → "
+                    'count_aggregated_on(period="last_week"). '
+                    "Дата, диапазон и last_week взаимоисключающие. Если цех указан только "
+                    "по названию или номеру, не вызывай инструмент. "
+                    "Без указанного цеха опусти work_center_id.\n"
                     "Примеры:\n"
                     "«Сколько изделий осталось в партии с ID 17?» → "
                     "get_batch_statistics(batch_id=17).\n"
@@ -120,31 +149,120 @@ class AssistantService:
             return await self._compare_batches(selected_tool, tool_call["args"])
         if selected_tool.name == "get_dashboard":
             return await self._get_dashboard(selected_tool, tool_call["args"])
+        if selected_tool.name == "count_aggregated_on":
+            return await self._count_aggregated_on(
+                selected_tool, tool_call["args"], now=now
+            )
 
         try:
             search_args = FindBatchesArgs.model_validate(tool_call["args"])
         except ValidationError as error:
             raise InvalidModelResponseError() from error
         try:
-            result = await selected_tool.ainvoke(search_args.model_dump())
+            result = await selected_tool.ainvoke(
+                search_args.model_dump(exclude_defaults=True)
+            )
             search = BatchSearchResult.model_validate(result)
         except ValidationError as error:
             raise InvalidToolResultError() from error
 
         if len(search.items) > search_args.limit or any(
-            item.batch_number != search_args.batch_number
+            (
+                search_args.batch_number is not None
+                and item.batch_number != search_args.batch_number
+            )
             or (
                 search_args.batch_date is not None
                 and item.batch_date != search_args.batch_date
+            )
+            or (
+                search_args.date_from is not None
+                and item.batch_date < search_args.date_from
+            )
+            or (
+                search_args.date_to is not None
+                and item.batch_date > search_args.date_to
+            )
+            or (
+                search_args.work_center_id is not None
+                and item.work_center_id != search_args.work_center_id
+            )
+            or (search_args.shift is not None and item.shift != search_args.shift)
+            or (
+                search_args.is_closed is not None
+                and item.is_closed != search_args.is_closed
             )
             for item in search.items
         ):
             raise InvalidToolResultError()
 
+        if search_args.count_only:
+            return AssistantResult(
+                status="answered",
+                answer=f"Партий по заданным фильтрам: {search.total}.",
+                tools_called=["find_batches"],
+            )
         if search.total == 1 and search_args.include_statistics:
             batch = search.items[0]
             return await self._read_statistics(batch.id, search=search)
-        return self._search_result(search)
+        return self._search_result(
+            search, clarify_number=search_args.batch_number is not None
+        )
+
+    async def _count_aggregated_on(
+        self, tool: BaseTool, args: dict[str, object], *, now: datetime
+    ) -> AssistantResult:
+        try:
+            request = AggregationDayArgs.model_validate(args)
+        except ValidationError as error:
+            raise InvalidModelResponseError() from error
+        start, end = resolve_aggregation_range(
+            request, now, ZoneInfo(settings.production_timezone)
+        )
+        date_args = (
+            {"day": start} if start == end else {"date_from": start, "date_to": end}
+        )
+        period = (
+            f"{start:%d.%m.%Y}"
+            if start == end
+            else f"С {start:%d.%m.%Y} по {end:%d.%m.%Y}"
+        )
+        try:
+            result = await tool.ainvoke(
+                {**date_args, "work_center_id": request.work_center_id}
+            )
+            counts = AggregationDayToolResult.model_validate(result)
+        except WorkCenterNotFoundError:
+            return AssistantResult(
+                status="not_found",
+                answer=f"Цех с ID {request.work_center_id} не найден.",
+                tools_called=[tool.name],
+            )
+        except ValidationError as error:
+            raise InvalidToolResultError() from error
+        count = counts.aggregated_products
+        unknown = counts.unknown_work_center_count
+        if request.work_center_id is None:
+            if unknown is not None:
+                raise InvalidToolResultError()
+            answer = f"{period} агрегировали {count} изд. по всем цехам."
+        else:
+            if unknown is None:
+                raise InvalidToolResultError()
+            answer = (
+                f"{period} в цехе с ID {request.work_center_id} "
+                f"подтверждено {count} агрегированных изд."
+            )
+            if unknown:
+                answer += (
+                    f" У {unknown} изд. за {'этот день' if start == end else 'этот период'} цех неизвестен. "
+                    "Точный итог по цеху недоступен."
+                )
+        return AssistantResult(
+            status="answered",
+            answer=answer,
+            tools_called=[tool.name],
+        )
 
     async def _get_dashboard(
         self, tool: BaseTool, args: dict[str, object]
@@ -158,11 +276,16 @@ class AssistantService:
             dashboard = DashboardToolResult.model_validate(result)
         except ValidationError as error:
             raise InvalidToolResultError() from error
+        scope = ""
+        if request.work_center_id is not None:
+            scope += f" Цех с ID {request.work_center_id}."
+        if request.shift is not None:
+            scope += f" Смена: {request.shift}."
         return AssistantResult(
             status="answered",
             answer=(
-                f"Дата партии с {request.date_from:%d.%m.%Y} по {request.date_to:%d.%m.%Y}. "
-                f"Сейчас агрегировано: {dashboard.aggregated_products} изд."
+                f"Дата партии с {request.date_from:%d.%m.%Y} по {request.date_to:%d.%m.%Y}."
+                f"{scope} Сейчас агрегировано: {dashboard.aggregated_products} изд."
             ),
             tools_called=[tool.name],
         )
@@ -219,25 +342,39 @@ class AssistantService:
                 tools_called=tools_called,
             )
         try:
-            statistics = BatchStatisticsResult.model_validate(result)
+            statistics = BatchStatisticsToolResult.model_validate(result)
         except ValidationError as error:
             raise InvalidToolResultError() from error
         label = f"Партия с ID {batch_id}"
         if search is not None:
             batch = search.items[0]
             label = f"Партия №{batch.batch_number} от {batch.batch_date:%d.%m.%Y} (ID {batch_id})"
+        answer = (
+            f"{label}: всего {statistics.total} изделий, "
+            f"агрегировано {statistics.aggregated}, осталось {statistics.remaining}."
+        )
+        if statistics.aggregation_percent is not None:
+            answer += f" Выполнение: {statistics.aggregation_percent:g}%."
+            if statistics.products_per_hour is None:
+                answer += " Текущий темп недоступен."
+            else:
+                answer += f" Текущий темп: {statistics.products_per_hour:g} изд./ч."
         return AssistantResult(
             status="answered",
-            answer=(
-                f"{label}: всего {statistics.total} изделий, "
-                f"агрегировано {statistics.aggregated}, осталось {statistics.remaining}."
+            answer=answer,
+            data=AssistantData(
+                batch_id=batch_id,
+                **statistics.model_dump(
+                    exclude={"aggregation_percent", "products_per_hour"}
+                ),
             ),
-            data=AssistantData(batch_id=batch_id, **statistics.model_dump()),
             tools_called=tools_called,
         )
 
     @staticmethod
-    def _search_result(search: BatchSearchResult) -> AssistantResult:
+    def _search_result(
+        search: BatchSearchResult, *, clarify_number: bool
+    ) -> AssistantResult:
         if search.total == 0:
             return AssistantResult(
                 status="not_found",
@@ -249,11 +386,21 @@ class AssistantService:
             item = search.items[0]
             answer = f"Найдена партия №{item.batch_number} от {item.batch_date:%d.%m.%Y}, ID {item.id}."
         else:
-            answer = f"Найдено партий: {search.total}. Уточните дату партии."
+            answer = f"Найдено партий: {search.total}."
+            if clarify_number:
+                answer += " Уточните дату партии."
             if search.total > len(search.items):
                 answer += f" Показаны первые {len(search.items)} совпадений."
+            if not clarify_number:
+                lines = [
+                    f"№{item.batch_number} от {item.batch_date:%d.%m.%Y}, ID {item.id}"
+                    for item in search.items
+                ]
+                answer += "\n" + "\n".join(lines)
         return AssistantResult(
-            status="answered" if search.total == 1 else "needs_clarification",
+            status="needs_clarification"
+            if search.total > 1 and clarify_number
+            else "answered",
             answer=answer,
             search=search,
             tools_called=["find_batches"],

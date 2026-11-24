@@ -10,6 +10,19 @@ class WorkCenterRepository(BaseRepository[WorkCenter]):
     def __init__(self, session: AsyncSession) -> None:
         super().__init__(session, WorkCenter)
 
+    async def get_by_id_for_update(self, work_center_id: int) -> WorkCenter | None:
+        return await self.session.get(
+            WorkCenter, work_center_id, populate_existing=True, with_for_update=True
+        )
+
+    async def get_by_id_for_assignment(self, work_center_id: int) -> WorkCenter | None:
+        return await self.session.get(
+            WorkCenter,
+            work_center_id,
+            populate_existing=True,
+            with_for_update={"read": True, "key_share": True},
+        )
+
     async def get_by_identifier(
         self,
         identifier: str,

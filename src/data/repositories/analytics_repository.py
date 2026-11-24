@@ -4,6 +4,7 @@ from typing import overload
 from sqlalchemy import (
     Integer,
     String,
+    and_,
     case,
     cast,
     func,
@@ -13,6 +14,7 @@ from sqlalchemy import (
     union_all,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql.elements import ColumnElement
 
 from src.application.analytics.calculator import dashboard_metrics
 from src.application.dto.analytics import (
@@ -39,9 +41,39 @@ def utc(value: datetime | None) -> datetime | None:
     return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
 
 
+def _aggregation_period(start_utc: datetime, end_utc: datetime) -> ColumnElement[bool]:
+    return and_(
+        Product.is_aggregated.is_(True),
+        Product.aggregated_at >= start_utc,
+        Product.aggregated_at < end_utc,
+    )
+
+
 class AnalyticsRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
+
+    async def count_aggregated_products(
+        self, start_utc: datetime, end_utc: datetime
+    ) -> int:
+        statement = select(func.count(Product.id)).where(
+            _aggregation_period(start_utc, end_utc)
+        )
+        result = await self.session.execute(statement)
+        return result.scalar_one()
+
+    async def count_aggregated_products_by_work_center(
+        self, start_utc: datetime, end_utc: datetime, *, work_center_id: int
+    ) -> tuple[int, int]:
+        """Return the confirmed count for the center and the period-wide unknown count."""
+        center = Product.aggregation_work_center_id
+        statement = select(
+            func.count(Product.id).filter(center == work_center_id),
+            func.count(Product.id).filter(center.is_(None)),
+        ).where(_aggregation_period(start_utc, end_utc))
+        result = await self.session.execute(statement)
+        confirmed, unknown = result.tuples().one()
+        return confirmed, unknown
 
     async def dashboard(
         self,

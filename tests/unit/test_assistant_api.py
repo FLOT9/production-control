@@ -15,6 +15,7 @@ from src.api.exception_handlers import register_exception_handlers
 from src.api.v1.routers.assistant import router
 from src.core.config import settings
 from src.domain.exceptions.batch import BatchNotFoundError
+from src.domain.exceptions.work_center import WorkCenterNotFoundError
 
 
 class AssistantApiTests(TestCase):
@@ -26,6 +27,8 @@ class AssistantApiTests(TestCase):
                 total_products=10,
                 aggregated_products=8,
                 pending_products=2,
+                aggregation_percent=80.0,
+                timeline=SimpleNamespace(products_per_hour=4.0),
             )
         )
 
@@ -276,8 +279,144 @@ class AssistantApiTests(TestCase):
                 "find_batches",
                 "compare_batches",
                 "get_dashboard",
+                "count_aggregated_on",
             },
         )
+
+    def test_count_open_batches_uses_total_instead_of_page_size(self):
+        items, _ = self.search_read.return_value
+        self.search_read.return_value = ([{**items[0], "shift": "1"}], 12)
+        self.bound.ainvoke.return_value = AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "name": "find_batches",
+                    "args": {
+                        "work_center_id": 7,
+                        "is_closed": False,
+                        "date_from": "2026-11-09",
+                        "date_to": "2026-11-10",
+                        "shift": "1",
+                        "count_only": True,
+                    },
+                    "id": "count-batches",
+                    "type": "tool_call",
+                }
+            ],
+        )
+        response = self.ask({"question": "Сколько открытых партий в цехе с ID 7?"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["answer"], "Партий по заданным фильтрам: 12.")
+        filters = self.search_read.await_args.kwargs["filters"]
+        self.assertEqual(filters.work_center_id, 7)
+        self.assertIs(filters.is_closed, False)
+        self.assertEqual(filters.shift, "1")
+        self.assertEqual(filters.date_from, date(2026, 11, 9))
+        self.assertEqual(filters.date_to, date(2026, 11, 10))
+
+    def test_aggregation_count_uses_the_operation_day(self):
+        count = AsyncMock(return_value=7)
+
+        @asynccontextmanager
+        async def dashboard_service():
+            yield SimpleNamespace(count_aggregated_on=count)
+
+        self.bound.ainvoke.return_value = AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "name": "count_aggregated_on",
+                    "args": {"day": "2026-09-05"},
+                    "id": "aggregation-call",
+                    "type": "tool_call",
+                }
+            ],
+        )
+        with patch(
+            "src.api.dependencies.assistant.analytics_dashboard_service",
+            new=dashboard_service,
+        ):
+            response = self.ask(
+                {"question": "Сколько изделий агрегировали 5 сентября 2026 года?"}
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["tools_called"], ["count_aggregated_on"])
+        self.assertEqual(
+            response.json()["answer"], "05.09.2026 агрегировали 7 изд. по всем цехам."
+        )
+        count.assert_awaited_once_with(date(2026, 9, 5))
+
+    def test_aggregation_count_passes_both_dates_for_a_range(self):
+        count = AsyncMock(return_value=9)
+
+        @asynccontextmanager
+        async def dashboard_service():
+            yield SimpleNamespace(count_aggregated_between=count)
+
+        self.bound.ainvoke.return_value = AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "name": "count_aggregated_on",
+                    "args": {"date_from": "2026-09-04", "date_to": "2026-09-06"},
+                    "id": "aggregation-range",
+                    "type": "tool_call",
+                }
+            ],
+        )
+        with patch(
+            "src.api.dependencies.assistant.analytics_dashboard_service",
+            new=dashboard_service,
+        ):
+            response = self.ask({"question": "Сколько агрегировали с 4 по 6 сентября?"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json()["answer"],
+            "С 04.09.2026 по 06.09.2026 агрегировали 9 изд. по всем цехам.",
+        )
+        count.assert_awaited_once_with(date(2026, 9, 4), date(2026, 9, 6))
+
+    def test_aggregation_by_work_center_discloses_unknown_assignments(self):
+        count = AsyncMock(side_effect=[(2, 1), (0, 0), WorkCenterNotFoundError(12)])
+
+        @asynccontextmanager
+        async def dashboard_service():
+            yield SimpleNamespace(count_aggregated_on_by_work_center=count)
+
+        self.bound.ainvoke.return_value = AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "name": "count_aggregated_on",
+                    "args": {"day": "2026-09-05", "work_center_id": 12},
+                    "id": "work-center-count",
+                    "type": "tool_call",
+                }
+            ],
+        )
+        with patch(
+            "src.api.dependencies.assistant.analytics_dashboard_service",
+            new=dashboard_service,
+        ):
+            responses = [
+                self.ask({"question": "Сколько изделий агрегировали в цехе с ID 12?"})
+                for _ in range(3)
+            ]
+
+        for response in responses:
+            self.assertEqual(response.status_code, 200)
+        partial, exact, missing = [response.json() for response in responses]
+        self.assertIn("подтверждено 2", partial["answer"])
+        self.assertIn("У 1 изд. за этот день цех неизвестен", partial["answer"])
+        self.assertIn("Точный итог по цеху недоступен", partial["answer"])
+        self.assertIn("подтверждено 0", exact["answer"])
+        self.assertNotIn("недоступен", exact["answer"])
+        self.assertEqual(missing["status"], "not_found")
+        self.assertEqual(missing["answer"], "Цех с ID 12 не найден.")
+        self.assertEqual(count.await_count, 3)
+        count.assert_awaited_with(date(2026, 9, 5), work_center_id=12)
 
     def test_dashboard_validates_dates_before_opening_service(self):
         get_dashboard = AsyncMock(

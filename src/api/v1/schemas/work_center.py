@@ -21,5 +21,6 @@ class WorkCenterRead(WorkCenterBase):
     )
 
     id: int
+    is_archived: bool = False
     created_at: datetime
     updated_at: datetime

@@ -21,7 +21,10 @@ from src.domain.exceptions.batch import (
     BatchInvalidShiftPeriodError,
     BatchNotFoundError,
 )
-from src.domain.exceptions.work_center import WorkCenterNotFoundError
+from src.domain.exceptions.work_center import (
+    WorkCenterArchivedError,
+    WorkCenterNotFoundError,
+)
 from src.storage.batch_details_cache import BatchDetailsCache
 from src.storage.batch_list_cache import BatchListCache
 from src.storage.batch_statistics_cache import BatchStatisticsCache
@@ -221,9 +224,7 @@ class BatchService:
             changes.get("work_center_id", batch.work_center_id),
         )
         if work_center_id != batch.work_center_id:
-            work_center = await self.uow.work_centers.get_by_id(work_center_id)
-            if work_center is None:
-                raise WorkCenterNotFoundError(work_center_id)
+            await self._require_assignable_work_center(work_center_id)
 
         batch_number = cast(int, changes.get("batch_number", batch.batch_number))
         batch_date = cast(date, changes.get("batch_date", batch.batch_date))
@@ -370,6 +371,15 @@ class BatchService:
         await self.list_cache.invalidate()
         return batches
 
+    async def _require_assignable_work_center(self, work_center_id: int) -> None:
+        work_center = await self.uow.work_centers.get_by_id_for_assignment(
+            work_center_id
+        )
+        if work_center is None:
+            raise WorkCenterNotFoundError(work_center_id)
+        if work_center.is_archived:
+            raise WorkCenterArchivedError(work_center_id)
+
     async def _create_uncommitted(
         self,
         *,
@@ -388,9 +398,7 @@ class BatchService:
         if shift_end <= shift_start:
             raise BatchInvalidShiftPeriodError()
 
-        work_center = await self.uow.work_centers.get_by_id(work_center_id)
-        if work_center is None:
-            raise WorkCenterNotFoundError(work_center_id)
+        await self._require_assignable_work_center(work_center_id)
 
         existing_batch = await self.uow.batches.get_by_number_and_date(
             batch_number,

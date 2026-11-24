@@ -36,6 +36,7 @@ class AssistantServiceTests(IsolatedAsyncioTestCase):
             batch_date=None,
             limit: int = 5,
             include_statistics: bool = False,
+            **filters: object,
         ) -> dict:
             """Find batches by number."""
             return await self.read_search(batch_number, batch_date, limit)

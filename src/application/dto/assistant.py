@@ -12,6 +12,7 @@ class FoundBatch(BaseModel):
     batch_date: date
     work_center_id: int = Field(strict=True, gt=0, le=2**31 - 1)
     is_closed: bool = Field(strict=True)
+    shift: str | None = None
 
 
 class BatchSearchResult(BaseModel):
@@ -47,6 +48,11 @@ class AssistantData(BatchStatisticsResult):
     batch_id: int = Field(gt=0, le=2**31 - 1)
 
 
+class BatchStatisticsToolResult(BatchStatisticsResult):
+    aggregation_percent: float | None = Field(default=None, ge=0, le=100)
+    products_per_hour: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+
+
 class BatchComparisonToolItem(AssistantData):
     total: int = Field(ge=0, validation_alias="total_products")
     aggregated: int = Field(ge=0, validation_alias="aggregated_products")
@@ -59,6 +65,10 @@ class DashboardToolResult(BaseModel):
     model_config = ConfigDict(strict=True, extra="forbid")
 
     aggregated_products: int = Field(ge=0)
+
+
+class AggregationDayToolResult(DashboardToolResult):
+    unknown_work_center_count: int | None = Field(default=None, ge=0)
 
 
 class AssistantResult(BaseModel):

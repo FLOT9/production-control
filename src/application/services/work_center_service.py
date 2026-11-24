@@ -1,3 +1,5 @@
+from datetime import UTC, datetime
+
 from sqlalchemy.exc import IntegrityError
 
 from src.data.models import WorkCenter
@@ -50,6 +52,7 @@ class WorkCenterService:
             "id": work_center.id,
             "identifier": work_center.identifier,
             "name": work_center.name,
+            "is_archived": work_center.is_archived,
             "created_at": work_center.created_at.isoformat(),
             "updated_at": work_center.updated_at.isoformat(),
         }
@@ -70,12 +73,20 @@ class WorkCenterService:
         return work_center
 
     async def delete(self, work_center_id: int) -> None:
-        work_center = await self._get_from_db(work_center_id)
+        work_center = await self.uow.work_centers.get_by_id_for_update(work_center_id)
+        if work_center is None:
+            raise WorkCenterNotFoundError(work_center_id)
 
-        has_batches = await self.uow.batches.exists_by_work_center_id(work_center_id)
-        if has_batches:
-            raise WorkCenterHasBatchesError(work_center_id)
+        if not work_center.is_archived:
+            if await self.uow.batches.exists_by_work_center_id(work_center_id):
+                raise WorkCenterHasBatchesError(work_center_id)
 
-        await self.uow.work_centers.delete(work_center)
+            if await self.uow.products.exists_by_aggregation_work_center_id(
+                work_center_id
+            ):
+                work_center.is_archived = True
+                work_center.updated_at = datetime.now(UTC)
+            else:
+                await self.uow.work_centers.delete(work_center)
         await self.uow.commit()
         await self.cache.invalidate(work_center_id)

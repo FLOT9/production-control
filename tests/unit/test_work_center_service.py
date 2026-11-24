@@ -19,18 +19,23 @@ class WorkCenterServiceTests(IsolatedAsyncioTestCase):
             id=1,
             identifier="WC-1",
             name="Workshop",
+            is_archived=False,
             created_at=datetime(2026, 1, 1, tzinfo=UTC),
             updated_at=datetime(2026, 1, 1, tzinfo=UTC),
         )
         self.uow = SimpleNamespace(
             work_centers=SimpleNamespace(
                 get_by_id=AsyncMock(return_value=self.center),
+                get_by_id_for_update=AsyncMock(return_value=self.center),
                 get_by_identifier=AsyncMock(return_value=None),
                 create=AsyncMock(return_value=self.center),
                 delete=AsyncMock(),
             ),
             batches=SimpleNamespace(
                 exists_by_work_center_id=AsyncMock(return_value=False)
+            ),
+            products=SimpleNamespace(
+                exists_by_aggregation_work_center_id=AsyncMock(return_value=False)
             ),
             commit=AsyncMock(),
             rollback=AsyncMock(),
@@ -103,7 +108,7 @@ class WorkCenterServiceTests(IsolatedAsyncioTestCase):
 
     async def test_missing_center_blocks_deletion_even_with_cached_value(self):
         self.cache.get.return_value = {"id": 1}
-        self.uow.work_centers.get_by_id.return_value = None
+        self.uow.work_centers.get_by_id_for_update.return_value = None
         with self.assertRaises(WorkCenterNotFoundError):
             await self.service.delete(1)
         self.uow.work_centers.delete.assert_not_awaited()
@@ -115,3 +120,16 @@ class WorkCenterServiceTests(IsolatedAsyncioTestCase):
         with self.assertRaises(RuntimeError):
             await self.service.delete(1)
         self.cache.invalidate.assert_not_awaited()
+
+    async def test_delete_archives_a_center_with_aggregation_history(self):
+        self.uow.products.exists_by_aggregation_work_center_id.return_value = True
+
+        await self.service.delete(1)
+        await self.service.delete(1)
+
+        self.assertTrue((await self.service.get_by_id(1))["is_archived"])
+        self.uow.products.exists_by_aggregation_work_center_id.assert_awaited_once_with(
+            1
+        )
+        self.uow.work_centers.delete.assert_not_awaited()
+        self.assertEqual(self.uow.commit.await_count, 2)

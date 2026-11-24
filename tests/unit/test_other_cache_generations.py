@@ -64,7 +64,12 @@ class OtherCacheGenerationTests(unittest.IsolatedAsyncioTestCase):
         resume = asyncio.Event()
         now = datetime.now(UTC)
         database_row = SimpleNamespace(
-            id=1, identifier="WC-1", name="Center", created_at=now, updated_at=now
+            id=1,
+            identifier="WC-1",
+            name="Center",
+            is_archived=False,
+            created_at=now,
+            updated_at=now,
         )
         reads = 0
 

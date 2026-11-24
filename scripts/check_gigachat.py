@@ -3,6 +3,7 @@ import asyncio
 
 from src.application.ai.assistant_service import AssistantService
 from src.application.ai.tools import (
+    create_aggregation_day_tool,
     create_compare_batches_tool,
     create_dashboard_tool,
     create_find_batches_tool,
@@ -28,6 +29,7 @@ async def main(question: str) -> None:
                 create_find_batches_tool(batch_search_service),
                 create_compare_batches_tool(batch_comparison_service),
                 create_dashboard_tool(analytics_dashboard_service),
+                create_aggregation_day_tool(analytics_dashboard_service),
             ]
             assistant = AssistantService(
                 LangChainModelAdapter(model, tools),

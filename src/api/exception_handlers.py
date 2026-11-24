@@ -31,6 +31,7 @@ from src.domain.exceptions.product import (
 )
 from src.domain.exceptions.work_center import (
     WorkCenterAlreadyExistsError,
+    WorkCenterArchivedError,
     WorkCenterHasBatchesError,
     WorkCenterNotFoundError,
 )
@@ -45,6 +46,7 @@ ERROR_STATUS_CODES: dict[type[Exception], int] = {
     AssistantDataUnavailableError: status.HTTP_503_SERVICE_UNAVAILABLE,
     UnsafeWebhookUrlError: status.HTTP_422_UNPROCESSABLE_CONTENT,
     WorkCenterAlreadyExistsError: status.HTTP_409_CONFLICT,
+    WorkCenterArchivedError: status.HTTP_409_CONFLICT,
     WorkCenterNotFoundError: status.HTTP_404_NOT_FOUND,
     WorkCenterHasBatchesError: status.HTTP_409_CONFLICT,
     BatchAlreadyExistsError: status.HTTP_409_CONFLICT,

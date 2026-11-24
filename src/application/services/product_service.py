@@ -171,6 +171,7 @@ class ProductService:
 
         product.is_aggregated = True
         product.aggregated_at = datetime.now(UTC)
+        product.aggregation_work_center_id = batch.work_center_id
 
         await self.webhook_event_service.create_deliveries(
             WebhookEvent(

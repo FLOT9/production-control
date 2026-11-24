@@ -9,6 +9,12 @@ class ProductRepository(BaseRepository[Product]):
     def __init__(self, session: AsyncSession) -> None:
         super().__init__(session, Product)
 
+    async def exists_by_aggregation_work_center_id(self, work_center_id: int) -> bool:
+        statement = select(
+            exists().where(Product.aggregation_work_center_id == work_center_id)
+        )
+        return bool(await self.session.scalar(statement))
+
     async def get_by_unique_code(
         self,
         unique_code: str,

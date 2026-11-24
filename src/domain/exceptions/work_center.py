@@ -11,3 +11,8 @@ class WorkCenterAlreadyExistsError(Exception):
 class WorkCenterHasBatchesError(Exception):
     def __init__(self, work_center_id: int) -> None:
         super().__init__(f"Work center with id={work_center_id} has related batches")
+
+
+class WorkCenterArchivedError(Exception):
+    def __init__(self, work_center_id: int) -> None:
+        super().__init__(f"Work center with id={work_center_id} is archived")
